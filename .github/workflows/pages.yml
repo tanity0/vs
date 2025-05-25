@@ -21,8 +21,14 @@ jobs:
         with: { path: ./dist }
 
   deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+  needs: build
+  runs-on: ubuntu-latest
+  permissions:
+    pages: write          # 👈 ここは既存を残す
+    id-token: write
+  environment:            # 追加 ---------
+    name: github-pages    #  🔴 必須
+    url: ${{ steps.deployment.outputs.page_url }}
+  steps:
+    - id: deployment
+      uses: actions/deploy-pages@v4

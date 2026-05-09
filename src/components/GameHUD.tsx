@@ -11,91 +11,117 @@ const GameHUD: React.FC<GameHUDProps> = ({ fps }) => {
   const gameTime = useGameStore(state => state.gameTime);
   const gameStats = useGameStore(state => state.gameStats);
   const enemies = useGameStore(state => state.enemies);
-  
-  // Format time
+
   const formattedTime = formatTime(gameTime / 1000);
-  
-  // Calculate experience percentage
   const expPercentage = (player.experience / player.experienceToNextLevel) * 100;
-  
-  // Get health percentage
   const healthPercentage = (player.health / player.maxHealth) * 100;
-  
+
   return (
-    <div className="absolute top-0 left-0 w-full pointer-events-none">
-      {/* Top Bar */}
-      <div className="p-2 flex justify-between items-center">
-        {/* Player Info */}
-        <div className="flex items-center">
-          <div className="bg-gray-800 bg-opacity-80 p-1 rounded-lg">
-            <div className="text-white text-sm font-medium">レベル {player.level}</div>
+    <div className="absolute inset-0 pointer-events-none text-white">
+      {/* Top bar */}
+      <div
+        className="absolute left-0 right-0 flex items-center justify-between gap-2 px-3"
+        style={{
+          top: 'max(env(safe-area-inset-top), 8px)',
+          paddingLeft: 'max(env(safe-area-inset-left), 12px)',
+          paddingRight: 'max(env(safe-area-inset-right), 12px)'
+        }}
+      >
+        <div className="glass-pill px-3 py-1 text-[13px] font-semibold tracking-tight">
+          Lv {player.level}
+        </div>
+        <div className="glass-pill px-3 py-1 text-[13px] font-semibold tabular-nums">
+          {formattedTime}
+        </div>
+        <div className="glass-pill px-3 py-1 text-[13px] font-semibold">
+          敵 {enemies.length}
+        </div>
+      </div>
+
+      {/* Health + XP card */}
+      <div
+        className="absolute left-0 right-0 px-3"
+        style={{
+          top: 'calc(max(env(safe-area-inset-top), 8px) + 40px)',
+          paddingLeft: 'max(env(safe-area-inset-left), 12px)',
+          paddingRight: 'max(env(safe-area-inset-right), 12px)'
+        }}
+      >
+        <div className="glass-panel rounded-2xl px-3 py-2 mx-auto max-w-md">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-widest text-red-200/80 w-8">HP</span>
+            <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-rose-500 to-red-400 transition-all duration-300"
+                style={{ width: `${healthPercentage}%` }}
+              />
+            </div>
+            <span className="text-[11px] tabular-nums text-white/80 w-12 text-right">
+              {Math.floor(player.health)}/{player.maxHealth}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-emerald-200/80 w-8">EXP</span>
+            <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-300 transition-all duration-300"
+                style={{ width: `${expPercentage}%` }}
+              />
+            </div>
+            <span className="text-[11px] tabular-nums text-white/60 w-12 text-right">
+              {Math.floor(expPercentage)}%
+            </span>
           </div>
         </div>
-        
-        {/* Timer */}
-        <div className="bg-gray-800 bg-opacity-80 p-1 rounded-lg">
-          <div className="text-white text-sm font-medium">{formattedTime}</div>
-        </div>
-        
-        {/* Enemy Count */}
-        <div className="bg-gray-800 bg-opacity-80 p-1 rounded-lg">
-          <div className="text-white text-sm font-medium">敵: {enemies.length}</div>
-        </div>
       </div>
-      
-      {/* Health Bar */}
-      <div className="px-2 mb-1">
-        <div className="h-3 bg-gray-800 bg-opacity-70 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all duration-300"
-            style={{ width: `${healthPercentage}%` }}
-          ></div>
-        </div>
-        <div className="text-white text-xs font-medium text-center">
-          {Math.floor(player.health)} / {player.maxHealth}
-        </div>
-      </div>
-      
-      {/* Experience Bar */}
-      <div className="px-2">
-        <div className="h-2 bg-gray-800 bg-opacity-70 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-gradient-to-r from-green-600 to-green-400 transition-all duration-300"
-            style={{ width: `${expPercentage}%` }}
-          ></div>
-        </div>
-      </div>
-      
-      {/* Weapons Display */}
-      <div className="absolute bottom-2 left-2">
-        <div className="bg-gray-800 bg-opacity-80 p-1 rounded-lg">
-          <div className="flex space-x-1">
+
+      {/* Weapons */}
+      <div
+        className="absolute"
+        style={{
+          left: 'max(env(safe-area-inset-left), 12px)',
+          bottom: 'calc(max(env(safe-area-inset-bottom), 12px) + 8px)'
+        }}
+      >
+        <div className="glass-panel rounded-2xl px-2 py-1.5">
+          <div className="flex items-center gap-1.5">
             {player.weapons.map(weapon => (
-              <div 
-                key={weapon.id} 
-                className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded"
-                title={`${weapon.name} (レベル ${weapon.level})`}
+              <div
+                key={weapon.id}
+                className="w-7 h-7 rounded-xl bg-white/10 flex items-center justify-center text-[11px] font-bold text-white"
+                title={`${weapon.name} (Lv ${weapon.level})`}
               >
-                <span className="text-xs font-bold text-white">{weapon.level}</span>
+                {weapon.level}
               </div>
             ))}
           </div>
         </div>
       </div>
-      
-      {/* Stats Display */}
-      <div className="absolute bottom-2 right-2">
-        <div className="bg-gray-800 bg-opacity-80 p-1 rounded-lg">
-          <div className="text-white text-xs">
-            <div>撃破数: {gameStats.enemiesKilled}</div>
-            <div>ダメージ: {Math.floor(gameStats.damageDealt)}</div>
-          </div>
+
+      {/* Stats */}
+      <div
+        className="absolute"
+        style={{
+          right: 'max(env(safe-area-inset-right), 12px)',
+          top: 'calc(max(env(safe-area-inset-top), 8px) + 116px)'
+        }}
+      >
+        <div className="glass-panel rounded-2xl px-2.5 py-1.5 text-[11px] leading-tight text-white/80">
+          <div>撃破 {gameStats.enemiesKilled}</div>
+          <div>DMG {Math.floor(gameStats.damageDealt)}</div>
         </div>
       </div>
-      
-      {/* FPS Counter (for development) */}
-      <div className="absolute top-2 right-2 text-xs text-gray-400">
-        {fps} FPS
+
+      {/* FPS */}
+      <div
+        className="absolute text-[10px] text-white/40 tabular-nums"
+        style={{
+          right: 'max(env(safe-area-inset-right), 12px)',
+          top: 'max(env(safe-area-inset-top), 8px)',
+          transform: 'translateY(-2px)'
+        }}
+      >
+        <span className="hidden">{fps}</span>
       </div>
     </div>
   );

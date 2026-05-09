@@ -36,7 +36,11 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({ target }) => {
   return (
     <button
       onClick={toggleFullscreen}
-      className="fixed top-2 right-2 z-20 bg-gray-800 bg-opacity-70 text-white p-1 rounded-lg"
+      className="fixed z-20 glass-panel rounded-full text-white/80 p-2"
+      style={{
+        top: 'calc(max(env(safe-area-inset-top), 8px) + 56px)',
+        right: 'max(env(safe-area-inset-right), 12px)'
+      }}
       aria-label={isFullscreen ? "フルスクリーン終了" : "フルスクリーン"}
     >
       {isFullscreen ? (

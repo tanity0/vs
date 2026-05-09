@@ -74,12 +74,7 @@ export const renderGame = (
   
   // Draw background
   drawBackground(ctx, width, height, camera);
-  
-  // Draw touch swipe guide for mobile
-  if (window.innerWidth < 768) {
-    drawSwipeGuide(ctx, width, height);
-  }
-  
+
   // Draw pickups
   pickups.forEach(pickup => drawPickup(ctx, pickup, camera));
   

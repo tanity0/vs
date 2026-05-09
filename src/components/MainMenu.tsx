@@ -56,28 +56,38 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartGame }) => {
   ];
   
   return (
-    <div className="h-full w-full flex flex-col items-center justify-center bg-gray-900 p-2 overflow-auto">
-      <div className="max-w-3xl w-full bg-gray-800 rounded-xl shadow-2xl overflow-hidden">
-        <div className="px-4 pt-4 pb-2 bg-gradient-to-r from-purple-900 to-indigo-900">
-          <h1 className="text-3xl font-bold text-center text-white mb-1">
+    <div
+      className="h-full w-full flex flex-col items-center justify-center bg-[#0b0b12] overflow-auto"
+      style={{
+        paddingTop: 'max(env(safe-area-inset-top), 16px)',
+        paddingBottom: 'max(env(safe-area-inset-bottom), 16px)',
+        paddingLeft: 'max(env(safe-area-inset-left), 12px)',
+        paddingRight: 'max(env(safe-area-inset-right), 12px)'
+      }}
+    >
+      <div className="max-w-3xl w-full glass-panel rounded-3xl overflow-hidden">
+        <div className="px-5 pt-6 pb-3 text-center">
+          <h1 className="text-3xl font-semibold tracking-tight text-white">
             ダークサバイバーズ
           </h1>
-          <p className="text-center text-purple-200 text-sm">
+          <p className="text-[13px] text-white/60 mt-1">
             終わりなき闇の大群から生き残れ
           </p>
         </div>
-        
+
         <div className="p-3">
-          <h2 className="text-xl font-semibold text-white mb-3">キャラクターを選択</h2>
-          
+          <h2 className="text-[13px] uppercase tracking-widest text-white/50 mb-2 px-1">
+            キャラクターを選択
+          </h2>
+
           <div className="grid grid-cols-2 gap-2 mb-4">
             {characterClasses.map((charClass) => (
               <div
                 key={charClass.id}
-                className={`relative p-2 rounded-lg transition-all duration-300 cursor-pointer ${
+                className={`relative p-3 rounded-2xl transition-colors cursor-pointer border ${
                   selectedClass === charClass.id
-                    ? 'bg-purple-800 ring-2 ring-purple-500 shadow-lg transform scale-105'
-                    : 'bg-gray-700 hover:bg-gray-600'
+                    ? 'bg-blue-500/15 border-blue-400/60'
+                    : 'bg-white/5 border-white/10 active:bg-white/10'
                 }`}
                 onClick={() => setSelectedClass(charClass.id)}
               >
@@ -131,29 +141,28 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartGame }) => {
                 </div>
                 
                 {selectedClass === charClass.id && (
-                  <div className="absolute top-1 right-1">
-                    <div className="w-3 h-3 rounded-full bg-purple-500"></div>
-                  </div>
+                  <div className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.8)]" />
                 )}
               </div>
             ))}
           </div>
-          
-          <div className="flex flex-col items-center">
+
+          <div className="flex flex-col items-center px-2">
             <button
               onClick={() => onStartGame(selectedClass)}
-              className="px-6 py-2 text-base font-medium rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-lg transform transition-all duration-300 hover:scale-105"
+              className="w-full py-3 rounded-2xl text-base font-semibold text-white"
+              style={{
+                background: 'linear-gradient(180deg, rgba(96, 165, 250, 0.95), rgba(59, 130, 246, 0.95))',
+                boxShadow: '0 8px 24px rgba(59, 130, 246, 0.35)'
+              }}
             >
-              ゲームスタート
+              はじめる
             </button>
-            
-            <div className="mt-3 text-gray-400 text-xs space-y-1">
-              <p className="text-center">
-                WASDキーまたは矢印キーで移動。できるだけ長く生き残りましょう！
-              </p>
-              <p className="text-center text-cyan-300">
-                スペースキー（モバイルはガードボタン）で飛び道具をガード！
-                発動直後のジャストガードで弾を反射できます。
+
+            <div className="mt-3 text-[12px] text-white/60 space-y-1 text-center">
+              <p>左下のスティックで移動／キーボードはWASD・矢印</p>
+              <p className="text-cyan-300/90">
+                右下の「ガード」で敵弾をブロック。発動直後のジャストガードで反射！
               </p>
             </div>
           </div>

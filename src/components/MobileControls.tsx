@@ -6,7 +6,7 @@ interface MobileControlsProps {
 }
 
 const MobileControls: React.FC<MobileControlsProps> = ({ showDirectionalButtons = false }) => {
-  const isPaused = useGameStore(state => state.isPaused);
+  const isGuarding = useGameStore(state => state.player.isGuarding);
 
   const setInputState = (direction: 'up' | 'down' | 'left' | 'right', active: boolean) => {
     useGameStore.setState(state => ({
@@ -14,6 +14,12 @@ const MobileControls: React.FC<MobileControlsProps> = ({ showDirectionalButtons 
         ...state.inputState,
         [direction]: active
       }
+    }));
+  };
+
+  const setGuardInput = (active: boolean) => {
+    useGameStore.setState(state => ({
+      inputState: { ...state.inputState, guard: active }
     }));
   };
 
@@ -25,6 +31,16 @@ const MobileControls: React.FC<MobileControlsProps> = ({ showDirectionalButtons 
   const handleTouchEnd = (direction: 'up' | 'down' | 'left' | 'right') => (e: React.TouchEvent) => {
     e.preventDefault();
     setInputState(direction, false);
+  };
+
+  const handleGuardStart = (e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    setGuardInput(true);
+  };
+
+  const handleGuardEnd = (e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    setGuardInput(false);
   };
 
   const handlePauseButton = (e: React.MouseEvent) => {
@@ -85,7 +101,23 @@ const MobileControls: React.FC<MobileControlsProps> = ({ showDirectionalButtons 
           </div>
         )}
         
-        <div className={showDirectionalButtons ? "" : "ml-auto"}>
+        <div className={`flex items-center gap-3 ${showDirectionalButtons ? "" : "ml-auto"}`}>
+          <button
+            className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xs font-bold border-2 transition-colors touch-none select-none ${
+              isGuarding
+                ? 'bg-cyan-500 bg-opacity-80 border-cyan-200 shadow-lg shadow-cyan-500/40'
+                : 'bg-gray-800 bg-opacity-70 border-gray-600'
+            }`}
+            onTouchStart={handleGuardStart}
+            onTouchEnd={handleGuardEnd}
+            onTouchCancel={handleGuardEnd}
+            onMouseDown={handleGuardStart}
+            onMouseUp={handleGuardEnd}
+            onMouseLeave={handleGuardEnd}
+            aria-label="ガード"
+          >
+            <span>ガード</span>
+          </button>
           <button
             className="w-12 h-12 bg-gray-800 bg-opacity-70 rounded-full flex items-center justify-center"
             onClick={handlePauseButton}

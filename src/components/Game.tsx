@@ -125,7 +125,9 @@ const Game: React.FC<GameProps> = ({ onGameOver }) => {
       <GameHUD fps={fps} />
       <FullscreenButton target={containerRef} />
       
-      {/* Mobile controls for pause button only, swipes handle movement */}
+      {/* Mobile controls: guard + pause buttons. Always rendered so the
+          guard button is reachable on touch devices regardless of screen
+          size, while keyboard users can rely on Space. */}
       {isMobile && <MobileControls showDirectionalButtons={false} />}
       
       {isPaused && !showUpgradeMenu && (

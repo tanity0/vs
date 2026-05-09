@@ -1,10 +1,17 @@
 import { create } from 'zustand';
 import { generateUpgradeOptions } from '../utils/upgradeUtils';
-import { 
-  Player, Enemy, Projectile, Pickup, GameStats, 
+import {
+  Player, Enemy, Projectile, Pickup, GameStats,
   InputState, UpgradeOption, GameBounds, CharacterClass
 } from '../types/game';
 import { getStartingWeapons } from '../utils/weaponUtils';
+
+// Guard mechanic tuning
+export const JUST_GUARD_WINDOW = 180; // ms from guard activation
+export const GUARD_COOLDOWN = 350; // ms after release before guard can be raised again
+export const GUARD_MOVE_MULTIPLIER = 0.45;
+export const REFLECT_DAMAGE_MULTIPLIER = 2.5;
+export const REFLECT_SPEED_MULTIPLIER = 1.4;
 
 interface GameState {
   player: Player;
@@ -32,6 +39,7 @@ interface GameState {
   damagePlayer: (amount: number) => boolean;
   gainExperience: (amount: number) => void;
   levelUp: () => void;
+  setGuard: (active: boolean) => void;
   
   // Weapon actions
   fireWeapons: (currentTime: number) => void;
@@ -47,6 +55,7 @@ interface GameState {
   addProjectile: (projectile: Projectile) => void;
   removeProjectile: (id: string) => void;
   updateProjectiles: (deltaTime: number) => void;
+  reflectProjectile: (id: string, multiplier?: number) => void;
   
   // Pickup actions
   addPickup: (pickup: Pickup) => void;
@@ -80,7 +89,11 @@ export const useGameStore = create<GameState>((set, get) => ({
     isMoving: false,
     invulnerable: false,
     invulnerableTime: 0,
-    lastDirection: null
+    lastDirection: null,
+    isGuarding: false,
+    guardStartTime: 0,
+    guardReleaseTime: 0,
+    lastJustGuardTime: 0
   },
   enemies: [],
   projectiles: [],
@@ -89,7 +102,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   isPaused: false,
   showUpgradeMenu: false,
   upgradeOptions: [],
-  inputState: { up: false, down: false, left: false, right: false },
+  inputState: { up: false, down: false, left: false, right: false, guard: false },
   swipeDirection: null,
   gameBounds: { width: 800, height: 600 },
   gameStats: {
@@ -114,12 +127,15 @@ export const useGameStore = create<GameState>((set, get) => ({
       let direction = 'idle';
       let isMoving = false;
       let lastDirection = player.lastDirection;
-      
+      const moveSpeed = player.isGuarding
+        ? player.speed * GUARD_MOVE_MULTIPLIER
+        : player.speed;
+
       // Handle movement based on input state (keyboard) or swipe direction (touch)
       if (swipeDirection) {
         // Move based on swipe direction
-        newX += swipeDirection.x * player.speed * deltaTime;
-        newY += swipeDirection.y * player.speed * deltaTime;
+        newX += swipeDirection.x * moveSpeed * deltaTime;
+        newY += swipeDirection.y * moveSpeed * deltaTime;
         
         // Set dominant direction for animation
         const absX = Math.abs(swipeDirection.x);
@@ -140,25 +156,25 @@ export const useGameStore = create<GameState>((set, get) => ({
         let dirY = 0;
         
         if (input.up) {
-          newY -= player.speed * deltaTime;
+          newY -= moveSpeed * deltaTime;
           direction = 'up';
           isMoving = true;
           dirY = -1;
         }
         if (input.down) {
-          newY += player.speed * deltaTime;
+          newY += moveSpeed * deltaTime;
           direction = 'down';
           isMoving = true;
           dirY = 1;
         }
         if (input.left) {
-          newX -= player.speed * deltaTime;
+          newX -= moveSpeed * deltaTime;
           direction = 'left';
           isMoving = true;
           dirX = -1;
         }
         if (input.right) {
-          newX += player.speed * deltaTime;
+          newX += moveSpeed * deltaTime;
           direction = 'right';
           isMoving = true;
           dirX = 1;
@@ -207,9 +223,47 @@ export const useGameStore = create<GameState>((set, get) => ({
     }));
   },
   
+  setGuard: (active) => {
+    set(state => {
+      const { player } = state;
+      const now = Date.now();
+
+      if (active) {
+        // Already guarding — no state change
+        if (player.isGuarding) return {};
+
+        // Respect guard cooldown after a release
+        if (
+          player.guardReleaseTime > 0 &&
+          now - player.guardReleaseTime < GUARD_COOLDOWN
+        ) {
+          return {};
+        }
+
+        return {
+          player: {
+            ...player,
+            isGuarding: true,
+            guardStartTime: now
+          }
+        };
+      }
+
+      // Releasing the guard
+      if (!player.isGuarding) return {};
+      return {
+        player: {
+          ...player,
+          isGuarding: false,
+          guardReleaseTime: now
+        }
+      };
+    });
+  },
+
   damagePlayer: (amount) => {
     const { player } = get();
-    
+
     if (player.invulnerable) return false;
     
     set(state => {
@@ -487,6 +541,24 @@ export const useGameStore = create<GameState>((set, get) => ({
       projectiles: state.projectiles.filter(p => p.id !== id)
     }));
   },
+
+  reflectProjectile: (id, multiplier = REFLECT_DAMAGE_MULTIPLIER) => {
+    set(state => ({
+      projectiles: state.projectiles.map(p => {
+        if (p.id !== id) return p;
+        return {
+          ...p,
+          direction: { x: -p.direction.x, y: -p.direction.y },
+          speed: p.speed * REFLECT_SPEED_MULTIPLIER,
+          damage: p.damage * multiplier,
+          hostile: false,
+          reflected: true,
+          hitEnemies: [],
+          createdAt: Date.now()
+        };
+      })
+    }));
+  },
   
   updateProjectiles: (deltaTime) => {
     const currentTime = Date.now();
@@ -618,7 +690,11 @@ export const useGameStore = create<GameState>((set, get) => ({
           isMoving: false,
           invulnerable: false,
           invulnerableTime: 0,
-          lastDirection: null
+          lastDirection: null,
+          isGuarding: false,
+          guardStartTime: 0,
+          guardReleaseTime: 0,
+          lastJustGuardTime: 0
         },
         enemies: [],
         projectiles: [],

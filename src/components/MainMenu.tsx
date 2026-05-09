@@ -147,9 +147,13 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartGame }) => {
               ゲームスタート
             </button>
             
-            <div className="mt-3 text-gray-400 text-xs">
+            <div className="mt-3 text-gray-400 text-xs space-y-1">
               <p className="text-center">
                 WASDキーまたは矢印キーで移動。できるだけ長く生き残りましょう！
+              </p>
+              <p className="text-center text-cyan-300">
+                スペースキー（モバイルはガードボタン）で飛び道具をガード！
+                発動直後のジャストガードで弾を反射できます。
               </p>
             </div>
           </div>

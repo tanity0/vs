@@ -15,25 +15,29 @@ export const checkCollision = (
 
 // Check collisions between projectiles and enemies
 export const checkProjectileEnemyCollisions = (
-  projectiles: Projectile[], 
+  projectiles: Projectile[],
   enemies: Enemy[]
 ): { projectileId: string; enemyId: string; damage: number }[] => {
   const collisions: { projectileId: string; enemyId: string; damage: number }[] = [];
-  
+
   projectiles.forEach(projectile => {
+    // Hostile projectiles only damage enemies once they've been reflected
+    if (projectile.hostile) {
+      return;
+    }
     enemies.forEach(enemy => {
       // Skip if already hit by this projectile (for passthrough weapons)
       if (projectile.hitEnemies.includes(enemy.id)) {
         return;
       }
-      
+
       if (checkCollision(projectile, enemy)) {
         collisions.push({
           projectileId: projectile.id,
           enemyId: enemy.id,
           damage: projectile.damage
         });
-        
+
         // Add to hit enemies list for passthrough weapons
         if (projectile.passthrough) {
           projectile.hitEnemies.push(enemy.id);
@@ -41,8 +45,18 @@ export const checkProjectileEnemyCollisions = (
       }
     });
   });
-  
+
   return collisions;
+};
+
+// Check collisions between hostile projectiles and the player.
+// Returns the projectiles that collided so the caller can decide whether
+// they were guarded, reflected, or did damage.
+export const checkProjectilePlayerCollisions = (
+  projectiles: Projectile[],
+  player: Player
+): Projectile[] => {
+  return projectiles.filter(p => p.hostile && checkCollision(p, player));
 };
 
 // Check collisions between player and enemies

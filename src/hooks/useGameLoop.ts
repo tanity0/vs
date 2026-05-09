@@ -1,7 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { useGameStore } from '../store/gameStore';
-import { checkProjectileEnemyCollisions, checkPlayerEnemyCollisions, checkPlayerPickupCollisions } from '../utils/collisionUtils';
-import { generateEnemy, getEnemySpawnCount, getEnemySpawnInterval } from '../utils/enemyUtils';
+import { JUST_GUARD_WINDOW, useGameStore } from '../store/gameStore';
+import {
+  checkProjectileEnemyCollisions,
+  checkPlayerEnemyCollisions,
+  checkPlayerPickupCollisions,
+  checkProjectilePlayerCollisions
+} from '../utils/collisionUtils';
+import {
+  BOSS_FIRE_INTERVAL,
+  RANGED_ATTACK_RANGE,
+  RANGED_FIRE_INTERVAL,
+  createEnemyProjectile,
+  generateEnemy,
+  getEnemySpawnCount,
+  getEnemySpawnInterval
+} from '../utils/enemyUtils';
 import { fireWeapon } from '../utils/weaponUtils';
 
 export const useGameLoop = (onGameOver: () => void) => {
@@ -31,6 +44,9 @@ export const useGameLoop = (onGameOver: () => void) => {
   const damageEnemy = useGameStore(state => state.damageEnemy);
   const damagePlayer = useGameStore(state => state.damagePlayer);
   const removeProjectile = useGameStore(state => state.removeProjectile);
+  const reflectProjectile = useGameStore(state => state.reflectProjectile);
+  const setGuard = useGameStore(state => state.setGuard);
+  const addProjectile = useGameStore(state => state.addProjectile);
   const collectPickup = useGameStore(state => state.collectPickup);
   const addPickup = useGameStore(state => state.addPickup);
   const setGameTime = useGameStore(state => state.setGameTime);
@@ -57,7 +73,7 @@ export const useGameLoop = (onGameOver: () => void) => {
         // Update game time
         setGameTime(gameTime + deltaTime * 1000);
         updateGameStats({ timeAlive: gameTime / 1000 });
-        
+
         // Update player invulnerability
         if (player.invulnerable && Date.now() - player.invulnerableTime > 1000) {
           useGameStore.setState(state => ({
@@ -67,7 +83,12 @@ export const useGameLoop = (onGameOver: () => void) => {
             }
           }));
         }
-        
+
+        // Sync guard state with input (keyboard or mobile button).
+        // Doing this every frame keeps the held-button state authoritative
+        // and lets setGuard enforce the post-release cooldown.
+        setGuard(inputState.guard);
+
         // Move player based on input or swipe direction
         movePlayer(inputState, deltaTime);
         
@@ -95,9 +116,54 @@ export const useGameLoop = (onGameOver: () => void) => {
         
         // Update projectiles
         updateProjectiles(deltaTime);
-        
+
+        // Ranged + boss enemies periodically fire hostile projectiles at the player.
+        const now = Date.now();
+        enemies.forEach(enemy => {
+          if (enemy.type !== 'ranged' && enemy.type !== 'boss') return;
+          const interval = enemy.type === 'boss' ? BOSS_FIRE_INTERVAL : RANGED_FIRE_INTERVAL;
+          if (now - enemy.lastShot < interval) return;
+          const dx = player.x - enemy.x;
+          const dy = player.y - enemy.y;
+          if (Math.hypot(dx, dy) > RANGED_ATTACK_RANGE) return;
+
+          addProjectile(createEnemyProjectile(enemy, player));
+          useGameStore.setState(state => ({
+            enemies: state.enemies.map(e =>
+              e.id === enemy.id ? { ...e, lastShot: now } : e
+            )
+          }));
+        });
+
+        // Check for collisions between hostile projectiles and the player.
+        // Read fresh projectile state because we may have just added enemy bolts.
+        const liveProjectiles = useGameStore.getState().projectiles;
+        const incoming = checkProjectilePlayerCollisions(liveProjectiles, player);
+        for (const proj of incoming) {
+          const currentPlayer = useGameStore.getState().player;
+          const guardElapsed = now - currentPlayer.guardStartTime;
+
+          if (currentPlayer.isGuarding && guardElapsed <= JUST_GUARD_WINDOW) {
+            // Just-guard: reflect the projectile back boosted
+            reflectProjectile(proj.id);
+            useGameStore.setState(state => ({
+              player: { ...state.player, lastJustGuardTime: now }
+            }));
+          } else if (currentPlayer.isGuarding) {
+            // Regular guard: absorb without damage
+            removeProjectile(proj.id);
+          } else {
+            // Unguarded hit
+            const playerDied = damagePlayer(proj.damage);
+            removeProjectile(proj.id);
+            if (playerDied) {
+              onGameOver();
+            }
+          }
+        }
+
         // Check for collisions between projectiles and enemies
-        const projectileEnemyCollisions = checkProjectileEnemyCollisions(projectiles, enemies);
+        const projectileEnemyCollisions = checkProjectileEnemyCollisions(useGameStore.getState().projectiles, enemies);
         
         projectileEnemyCollisions.forEach(({ projectileId, enemyId, damage }) => {
           const enemyKilled = damageEnemy(enemyId, damage);
@@ -215,9 +281,12 @@ export const useGameLoop = (onGameOver: () => void) => {
     updateEnemies,
     updateProjectiles,
     addEnemy,
+    addProjectile,
     damageEnemy,
     damagePlayer,
     removeProjectile,
+    reflectProjectile,
+    setGuard,
     collectPickup,
     addPickup,
     setGameTime,

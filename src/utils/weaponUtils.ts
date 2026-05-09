@@ -135,11 +135,13 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
           duration: 2000,
           createdAt: now,
           passthrough: weapon.passthrough || false,
-          hitEnemies: []
+          hitEnemies: [],
+          hostile: false,
+          reflected: false
         });
       }
       break;
-    
+
     case 'axe':
       // Axe is a spinning projectile that returns to player
       projectiles.push({
@@ -155,7 +157,9 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
         duration: 3000,
         createdAt: now,
         passthrough: true,
-        hitEnemies: []
+        hitEnemies: [],
+        hostile: false,
+        reflected: false
       });
       break;
     
@@ -203,7 +207,9 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
           duration: 2000,
           createdAt: now,
           passthrough: weapon.passthrough || false,
-          hitEnemies: []
+          hitEnemies: [],
+          hostile: false,
+          reflected: false
         });
       }
       break;
@@ -238,7 +244,9 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
         duration: weapon.duration || 300,
         createdAt: now,
         passthrough: true,
-        hitEnemies: []
+        hitEnemies: [],
+        hostile: false,
+        reflected: false
       });
       break;
     
@@ -263,11 +271,13 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
           duration: 500, // Short duration, will be recreated continuously
           createdAt: now,
           passthrough: true,
-          hitEnemies: []
+          hitEnemies: [],
+          hostile: false,
+          reflected: false
         });
       }
       break;
-    
+
     case 'garlic':
       // Garlic creates an aura around the player
       projectiles.push({
@@ -283,7 +293,9 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
         duration: 1000, // Continuous damage
         createdAt: now,
         passthrough: true,
-        hitEnemies: []
+        hitEnemies: [],
+        hostile: false,
+        reflected: false
       });
       break;
   }

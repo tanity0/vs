@@ -59,13 +59,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ width, height }) => {
       height,
       camera
     });
-    
-    // Debug - draw player position info
-    context.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    context.font = '12px Arial';
-    context.fillText(`Player: ${Math.floor(player.x)},${Math.floor(player.y)}`, 10, height - 20);
-    context.fillText(`Camera: ${Math.floor(camera.x)},${Math.floor(camera.y)}`, 10, height - 5);
-    
   }, [player, enemies, projectiles, pickups, width, height, isPaused, camera]);
   
   return (

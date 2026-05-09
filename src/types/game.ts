@@ -23,6 +23,11 @@ export interface Player {
   invulnerable: boolean;
   invulnerableTime: number;
   lastDirection: { x: number; y: number } | null;
+  // Guard state
+  isGuarding: boolean;
+  guardStartTime: number;
+  guardReleaseTime: number;
+  lastJustGuardTime: number;
 }
 
 // Movement direction
@@ -42,6 +47,7 @@ export interface Enemy {
   type: EnemyType;
   experienceValue: number;
   lastHit: number;
+  lastShot: number;
 }
 
 export type EnemyType = 'basic' | 'fast' | 'tank' | 'ranged' | 'boss';
@@ -63,7 +69,7 @@ export interface Weapon {
   count?: number;
 }
 
-export type WeaponType = 'knife' | 'axe' | 'wand' | 'whip' | 'bible' | 'garlic';
+export type WeaponType = 'knife' | 'axe' | 'wand' | 'whip' | 'bible' | 'garlic' | 'enemy_bolt';
 
 // Projectile types
 export interface Projectile {
@@ -80,6 +86,8 @@ export interface Projectile {
   createdAt: number;
   passthrough: boolean;
   hitEnemies: string[];
+  hostile: boolean;
+  reflected: boolean;
 }
 
 // Pickup types
@@ -121,6 +129,7 @@ export interface InputState {
   down: boolean;
   left: boolean;
   right: boolean;
+  guard: boolean;
 }
 
 // Game area bounds

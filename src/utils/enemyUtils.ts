@@ -1,4 +1,4 @@
-import { Enemy, EnemyType, GameBounds, Player } from '../types/game';
+import { Enemy, EnemyType, GameBounds, Player, Projectile } from '../types/game';
 
 // Generate a random enemy outside the visible area
 export const generateEnemy = (
@@ -69,9 +69,10 @@ export const generateEnemy = (
         damage: 10,
         type: 'basic',
         experienceValue: 1,
-        lastHit: 0
+        lastHit: 0,
+        lastShot: 0
       };
-    
+
     case 'fast':
       return {
         id: `enemy-${Date.now()}-${Math.random()}`,
@@ -85,7 +86,8 @@ export const generateEnemy = (
         damage: 5,
         type: 'fast',
         experienceValue: 2,
-        lastHit: 0
+        lastHit: 0,
+        lastShot: 0
       };
     
     case 'tank':
@@ -101,7 +103,8 @@ export const generateEnemy = (
         damage: 15,
         type: 'tank',
         experienceValue: 5,
-        lastHit: 0
+        lastHit: 0,
+        lastShot: 0
       };
     
     case 'ranged':
@@ -117,7 +120,8 @@ export const generateEnemy = (
         damage: 8,
         type: 'ranged',
         experienceValue: 3,
-        lastHit: 0
+        lastHit: 0,
+        lastShot: Date.now()
       };
     
     case 'boss':
@@ -133,7 +137,8 @@ export const generateEnemy = (
         damage: 25,
         type: 'boss',
         experienceValue: 20,
-        lastHit: 0
+        lastHit: 0,
+        lastShot: Date.now()
       };
     
     default:
@@ -149,9 +154,54 @@ export const generateEnemy = (
         damage: 10,
         type: 'basic',
         experienceValue: 1,
-        lastHit: 0
+        lastHit: 0,
+        lastShot: 0
       };
   }
+};
+
+// Configuration for ranged enemy attacks
+export const RANGED_ATTACK_RANGE = 400;
+export const RANGED_FIRE_INTERVAL = 1800;
+export const BOSS_FIRE_INTERVAL = 1200;
+export const ENEMY_PROJECTILE_SPEED = 220;
+export const ENEMY_PROJECTILE_DURATION = 4000;
+
+// Create a hostile projectile fired by an enemy toward the player.
+export const createEnemyProjectile = (
+  enemy: Enemy,
+  player: Player
+): Projectile => {
+  const ex = enemy.x + enemy.width / 2;
+  const ey = enemy.y + enemy.height / 2;
+  const px = player.x + player.width / 2;
+  const py = player.y + player.height / 2;
+
+  const dx = px - ex;
+  const dy = py - ey;
+  const dist = Math.max(0.001, Math.sqrt(dx * dx + dy * dy));
+  const dir = { x: dx / dist, y: dy / dist };
+
+  const size = enemy.type === 'boss' ? 18 : 14;
+  const damage = enemy.type === 'boss' ? 18 : 8;
+
+  return {
+    id: `proj-enemy-${enemy.id}-${Date.now()}-${Math.random()}`,
+    x: ex - size / 2,
+    y: ey - size / 2,
+    width: size,
+    height: size,
+    speed: ENEMY_PROJECTILE_SPEED,
+    damage,
+    direction: dir,
+    weaponType: 'enemy_bolt',
+    duration: ENEMY_PROJECTILE_DURATION,
+    createdAt: Date.now(),
+    passthrough: false,
+    hitEnemies: [],
+    hostile: true,
+    reflected: false
+  };
 };
 
 // Get enemy color based on type

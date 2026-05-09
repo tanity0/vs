@@ -1,5 +1,55 @@
 import { Player, Enemy, Projectile, Pickup, WeaponType, EnemyType } from '../types/game';
 import { getEnemyColor } from './enemyUtils';
+import { JUST_GUARD_WINDOW } from '../store/gameStore';
+
+// Draw the guard shield. The shield ring's color signals whether the player
+// is inside the just-guard window (gold) or holding a normal guard (cyan).
+const drawGuardShield = (
+  ctx: CanvasRenderingContext2D,
+  player: Player,
+  camera: { x: number; y: number }
+) => {
+  const cx = player.x + player.width / 2 - camera.x;
+  const cy = player.y + player.height / 2 - camera.y;
+  const baseRadius = player.width * 0.85;
+  const now = Date.now();
+
+  // Just-guard success flash — short white burst that overlays the shield
+  if (now - player.lastJustGuardTime < 250) {
+    const t = 1 - (now - player.lastJustGuardTime) / 250;
+    ctx.save();
+    ctx.globalAlpha = t;
+    ctx.fillStyle = '#FDE68A';
+    ctx.beginPath();
+    ctx.arc(cx, cy, baseRadius * (1.4 + (1 - t) * 0.6), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  if (!player.isGuarding) return;
+
+  const elapsed = now - player.guardStartTime;
+  const inJustGuard = elapsed <= JUST_GUARD_WINDOW;
+  const ringColor = inJustGuard ? '#FBBF24' : '#38BDF8';
+  const fillColor = inJustGuard
+    ? 'rgba(251, 191, 36, 0.25)'
+    : 'rgba(56, 189, 248, 0.18)';
+
+  ctx.save();
+  ctx.fillStyle = fillColor;
+  ctx.beginPath();
+  ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.lineWidth = inJustGuard ? 4 : 2;
+  ctx.strokeStyle = ringColor;
+  ctx.shadowColor = ringColor;
+  ctx.shadowBlur = inJustGuard ? 18 : 8;
+  ctx.beginPath();
+  ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+};
 
 interface RenderProps {
   player: Player;
@@ -24,12 +74,7 @@ export const renderGame = (
   
   // Draw background
   drawBackground(ctx, width, height, camera);
-  
-  // Draw touch swipe guide for mobile
-  if (window.innerWidth < 768) {
-    drawSwipeGuide(ctx, width, height);
-  }
-  
+
   // Draw pickups
   pickups.forEach(pickup => drawPickup(ctx, pickup, camera));
   
@@ -160,7 +205,7 @@ const drawPlayer = (
   if (player.invulnerable) {
     ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 50);
   }
-  
+
   // Draw player body
   ctx.fillStyle = '#8B5CF6'; // Primary purple
   ctx.beginPath();
@@ -172,6 +217,13 @@ const drawPlayer = (
     Math.PI * 2
   );
   ctx.fill();
+
+  // Reset alpha so shield visuals are not affected by invulnerability flicker
+  ctx.globalAlpha = 1;
+  drawGuardShield(ctx, player, camera);
+  if (player.invulnerable) {
+    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 50);
+  }
   
   // Draw player direction indicator
   ctx.fillStyle = '#F3F4F6';
@@ -389,6 +441,21 @@ const drawProjectile = (
     y: number;
   }
 ) => {
+  // Reflected projectiles get a gold trail overlay so the player can see
+  // their own counter-attack hurtling back at the enemy.
+  if (projectile.reflected) {
+    const cx = projectile.x + projectile.width / 2 - camera.x;
+    const cy = projectile.y + projectile.height / 2 - camera.y;
+    ctx.save();
+    ctx.shadowColor = '#FBBF24';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#FCD34D';
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(projectile.width, projectile.height) * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Different colors and shapes based on weapon type
   switch (projectile.weaponType) {
     case 'knife':
@@ -547,6 +614,28 @@ const drawProjectile = (
       ctx.restore();
       break;
     
+    case 'enemy_bolt': {
+      // Reflected enemy bolts are already drawn with the gold trail above;
+      // skip the red core so the visual stays clearly "yours".
+      if (projectile.reflected) break;
+      const cx = projectile.x + projectile.width / 2 - camera.x;
+      const cy = projectile.y + projectile.height / 2 - camera.y;
+      const radius = projectile.width / 2;
+
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      gradient.addColorStop(0, '#FCA5A5');
+      gradient.addColorStop(1, '#7F1D1D');
+      ctx.save();
+      ctx.shadowColor = '#EF4444';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+
     case 'garlic':
       // Garlic - pulsing circle aura
       const pulseRate = 0.003;

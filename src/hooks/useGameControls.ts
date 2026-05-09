@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { InputState } from '../types/game';
+
+const isGuardKey = (key: string) => {
+  const k = key.toLowerCase();
+  return k === ' ' || k === 'spacebar' || k === 'space' || k === 'shift' || k === 'j';
+};
 
 export const useGameControls = () => {
   // Set up keyboard controls
@@ -8,7 +12,7 @@ export const useGameControls = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const { key } = e;
       const inputState = { ...useGameStore.getState().inputState };
-      
+
       switch (key.toLowerCase()) {
         case 'w':
         case 'arrowup':
@@ -27,14 +31,22 @@ export const useGameControls = () => {
           inputState.right = true;
           break;
       }
-      
+
+      if (isGuardKey(key)) {
+        // Prevent the page from scrolling on Space and avoid auto-repeat noise
+        e.preventDefault();
+        if (!e.repeat) {
+          inputState.guard = true;
+        }
+      }
+
       useGameStore.setState({ inputState });
     };
-    
+
     const handleKeyUp = (e: KeyboardEvent) => {
       const { key } = e;
       const inputState = { ...useGameStore.getState().inputState };
-      
+
       switch (key.toLowerCase()) {
         case 'w':
         case 'arrowup':
@@ -53,14 +65,18 @@ export const useGameControls = () => {
           inputState.right = false;
           break;
       }
-      
+
+      if (isGuardKey(key)) {
+        inputState.guard = false;
+      }
+
       useGameStore.setState({ inputState });
     };
-    
+
     // Add event listeners for keyboard
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    
+
     // Cleanup
     return () => {
       window.removeEventListener('keydown', handleKeyDown);

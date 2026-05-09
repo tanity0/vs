@@ -5,10 +5,10 @@ import GameHUD from './GameHUD';
 import UpgradeMenu from './UpgradeMenu';
 import PauseMenu from './PauseMenu';
 import MobileControls from './MobileControls';
+import VirtualJoystick from './VirtualJoystick';
 import FullscreenButton from './FullscreenButton';
 import { useGameLoop } from '../hooks/useGameLoop';
 import { useGameControls } from '../hooks/useGameControls';
-import { useSwipeControls } from '../hooks/useSwipeControls';
 
 interface GameProps {
   onGameOver: () => void;
@@ -17,33 +17,31 @@ interface GameProps {
 const Game: React.FC<GameProps> = ({ onGameOver }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  
+  const [isTouch, setIsTouch] = useState(
+    typeof window !== 'undefined' &&
+      ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+  );
+
   const isPaused = useGameStore(state => state.isPaused);
   const showUpgradeMenu = useGameStore(state => state.showUpgradeMenu);
   const player = useGameStore(state => state.player);
   const setGameBounds = useGameStore(state => state.setGameBounds);
   const setPaused = useGameStore(state => state.setPaused);
-  
+
   // Set up game controls
   useGameControls();
-  
-  // Set up swipe controls for mobile
-  useSwipeControls();
-  
+
   // Start game loop
   const { fps } = useGameLoop(onGameOver);
-  
-  // Check if device is mobile
+
+  // Detect touch capability (re-checks if device profile changes mid-session)
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
+    const check = () => {
+      setIsTouch('ontouchstart' in window || navigator.maxTouchPoints > 0);
     };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    
-    return () => window.removeEventListener('resize', checkMobile);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
   }, []);
   
   // Update window size and game bounds on resize or fullscreen change
@@ -124,9 +122,10 @@ const Game: React.FC<GameProps> = ({ onGameOver }) => {
       <GameCanvas width={windowSize.width} height={windowSize.height} />
       <GameHUD fps={fps} />
       <FullscreenButton target={containerRef} />
-      
-      {/* Mobile controls for pause button only, swipes handle movement */}
-      {isMobile && <MobileControls showDirectionalButtons={false} />}
+
+      {/* Touch UI: virtual joystick (left) + guard / pause buttons (right) */}
+      {isTouch && <VirtualJoystick />}
+      {isTouch && <MobileControls />}
       
       {isPaused && !showUpgradeMenu && (
         <PauseMenu onResume={() => setPaused(false)} onQuit={onGameOver} />

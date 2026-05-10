@@ -91,24 +91,11 @@ const Game: React.FC<GameProps> = ({ onGameOver }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isPaused, setPaused, showUpgradeMenu]);
   
-  // Prevent default touch events
-  useEffect(() => {
-    const preventDefaultTouch = (e: TouchEvent) => {
-      e.preventDefault();
-    };
-    
-    if (containerRef.current) {
-      containerRef.current.addEventListener('touchmove', preventDefaultTouch, { passive: false });
-      containerRef.current.addEventListener('touchstart', preventDefaultTouch, { passive: false });
-    }
-    
-    return () => {
-      if (containerRef.current) {
-        containerRef.current.removeEventListener('touchmove', preventDefaultTouch);
-        containerRef.current.removeEventListener('touchstart', preventDefaultTouch);
-      }
-    };
-  }, []);
+  // Prevent text selection from long-press, but DON'T preventDefault on
+  // touchstart at the container level — doing so suppresses iOS Safari's
+  // synthesized click events, which breaks taps on UI buttons (e.g. the
+  // upgrade menu). Page scrolling is already disabled via
+  // `touch-action: none` in the global CSS.
   
   return (
     <div 

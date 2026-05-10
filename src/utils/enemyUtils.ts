@@ -70,7 +70,7 @@ export const generateEnemy = (
         type: 'basic',
         experienceValue: 1,
         lastHit: 0,
-        lastShot: 0
+        lastShot: Date.now() - Math.random() * 1500
       };
 
     case 'fast':
@@ -87,7 +87,7 @@ export const generateEnemy = (
         type: 'fast',
         experienceValue: 2,
         lastHit: 0,
-        lastShot: 0
+        lastShot: Date.now() - Math.random() * 1500
       };
     
     case 'tank':
@@ -104,7 +104,7 @@ export const generateEnemy = (
         type: 'tank',
         experienceValue: 5,
         lastHit: 0,
-        lastShot: 0
+        lastShot: Date.now() - Math.random() * 1500
       };
     
     case 'ranged':
@@ -121,7 +121,7 @@ export const generateEnemy = (
         type: 'ranged',
         experienceValue: 3,
         lastHit: 0,
-        lastShot: Date.now()
+        lastShot: Date.now() - Math.random() * 1500
       };
     
     case 'boss':
@@ -138,7 +138,7 @@ export const generateEnemy = (
         type: 'boss',
         experienceValue: 20,
         lastHit: 0,
-        lastShot: Date.now()
+        lastShot: Date.now() - Math.random() * 1500
       };
     
     default:
@@ -155,23 +155,55 @@ export const generateEnemy = (
         type: 'basic',
         experienceValue: 1,
         lastHit: 0,
-        lastShot: 0
+        lastShot: Date.now() - Math.random() * 1500
       };
   }
 };
 
-// Configuration for ranged enemy attacks
-export const RANGED_ATTACK_RANGE = 400;
-export const RANGED_FIRE_INTERVAL = 1800;
-export const BOSS_FIRE_INTERVAL = 1200;
-export const ENEMY_PROJECTILE_SPEED = 220;
+// Configuration for enemy attacks. Every enemy type fires now, but the
+// dedicated `ranged` and `boss` types fire much more often.
 export const ENEMY_PROJECTILE_DURATION = 4000;
+
+// Per-type fire profile. `range` is squared distance budget — enemies
+// only fire when the player is at least this close. Returns `null` for
+// enemies that should never fire.
+interface FireProfile {
+  interval: number; // ms between shots
+  range: number;    // px max distance to player
+  speed: number;
+  damage: number;
+  size: number;
+}
+
+export const getEnemyFireProfile = (enemy: Enemy): FireProfile | null => {
+  switch (enemy.type) {
+    case 'basic':
+      return { interval: 4500, range: 320, speed: 180, damage: 6, size: 12 };
+    case 'fast':
+      return { interval: 3200, range: 300, speed: 260, damage: 5, size: 10 };
+    case 'tank':
+      return { interval: 5000, range: 280, speed: 160, damage: 12, size: 16 };
+    case 'ranged':
+      return { interval: 1800, range: 400, speed: 240, damage: 8, size: 14 };
+    case 'boss':
+      return { interval: 1200, range: 480, speed: 260, damage: 18, size: 18 };
+    default:
+      return null;
+  }
+};
 
 // Create a hostile projectile fired by an enemy toward the player.
 export const createEnemyProjectile = (
   enemy: Enemy,
   player: Player
 ): Projectile => {
+  const profile = getEnemyFireProfile(enemy) ?? {
+    speed: 200,
+    damage: 6,
+    size: 12,
+    interval: 0,
+    range: 0
+  };
   const ex = enemy.x + enemy.width / 2;
   const ey = enemy.y + enemy.height / 2;
   const px = player.x + player.width / 2;
@@ -182,17 +214,14 @@ export const createEnemyProjectile = (
   const dist = Math.max(0.001, Math.sqrt(dx * dx + dy * dy));
   const dir = { x: dx / dist, y: dy / dist };
 
-  const size = enemy.type === 'boss' ? 18 : 14;
-  const damage = enemy.type === 'boss' ? 18 : 8;
-
   return {
     id: `proj-enemy-${enemy.id}-${Date.now()}-${Math.random()}`,
-    x: ex - size / 2,
-    y: ey - size / 2,
-    width: size,
-    height: size,
-    speed: ENEMY_PROJECTILE_SPEED,
-    damage,
+    x: ex - profile.size / 2,
+    y: ey - profile.size / 2,
+    width: profile.size,
+    height: profile.size,
+    speed: profile.speed,
+    damage: profile.damage,
     direction: dir,
     weaponType: 'enemy_bolt',
     duration: ENEMY_PROJECTILE_DURATION,

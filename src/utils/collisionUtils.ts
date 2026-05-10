@@ -72,12 +72,14 @@ export const checkPlayerPickupCollisions = (
   player: Player,
   pickups: Pickup[]
 ): string[] => {
-  // Expand player hitbox for pickups to make collection easier
+  // Slight magnet around the player so collection feels snappy without
+  // hoovering pickups from across the screen.
+  const PAD = 24;
   const expandedPlayer = {
-    x: player.x - 120,
-    y: player.y - 120,
-    width: player.width + 240,
-    height: player.height + 240
+    x: player.x - PAD,
+    y: player.y - PAD,
+    width: player.width + PAD * 2,
+    height: player.height + PAD * 2
   };
 
   // Pickups don't carry width/height in the type, so treat them as the

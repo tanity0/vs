@@ -66,13 +66,16 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartGame }) => {
       }}
     >
       <div className="max-w-3xl w-full glass-panel rounded-3xl overflow-hidden">
-        <div className="px-5 pt-6 pb-3 text-center">
+        <div className="relative px-5 pt-6 pb-3 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-white">
             ダークサバイバーズ
           </h1>
           <p className="text-[13px] text-white/60 mt-1">
             終わりなき闇の大群から生き残れ
           </p>
+          <span className="absolute top-3 right-3 glass-pill px-2 py-0.5 text-[10px] font-mono tabular-nums text-white/70">
+            v{__APP_VERSION__}
+          </span>
         </div>
 
         <div className="p-3">

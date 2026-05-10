@@ -69,19 +69,30 @@ export const checkPlayerEnemyCollisions = (
 
 // Check collisions between player and pickups
 export const checkPlayerPickupCollisions = (
-  player: Player, 
+  player: Player,
   pickups: Pickup[]
 ): string[] => {
   // Expand player hitbox for pickups to make collection easier
   const expandedPlayer = {
-    x: player.x - 120, // Greatly increased from 40 to 120
-    y: player.y - 120, // Greatly increased from 40 to 120
-    width: player.width + 240, // Greatly increased from 80 to 240
-    height: player.height + 240 // Greatly increased from 80 to 240
+    x: player.x - 120,
+    y: player.y - 120,
+    width: player.width + 240,
+    height: player.height + 240
   };
-  
+
+  // Pickups don't carry width/height in the type, so treat them as the
+  // 16×16 sprite the renderer draws.
+  const PICKUP_SIZE = 16;
+
   return pickups
-    .filter(pickup => checkCollision(expandedPlayer, pickup))
+    .filter(pickup =>
+      checkCollision(expandedPlayer, {
+        x: pickup.x,
+        y: pickup.y,
+        width: PICKUP_SIZE,
+        height: PICKUP_SIZE
+      })
+    )
     .map(pickup => pickup.id);
 };
 

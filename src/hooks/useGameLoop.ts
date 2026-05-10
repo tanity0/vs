@@ -7,11 +7,9 @@ import {
   checkProjectilePlayerCollisions
 } from '../utils/collisionUtils';
 import {
-  BOSS_FIRE_INTERVAL,
-  RANGED_ATTACK_RANGE,
-  RANGED_FIRE_INTERVAL,
   createEnemyProjectile,
   generateEnemy,
+  getEnemyFireProfile,
   getEnemySpawnCount,
   getEnemySpawnInterval
 } from '../utils/enemyUtils';
@@ -117,15 +115,17 @@ export const useGameLoop = (onGameOver: () => void) => {
         // Update projectiles
         updateProjectiles(deltaTime);
 
-        // Ranged + boss enemies periodically fire hostile projectiles at the player.
+        // Every enemy that has a fire profile periodically lobs a hostile
+        // projectile at the player. Each type has its own cadence/range so
+        // grunts shoot rarely and ranged/boss shoot often.
         const now = Date.now();
         enemies.forEach(enemy => {
-          if (enemy.type !== 'ranged' && enemy.type !== 'boss') return;
-          const interval = enemy.type === 'boss' ? BOSS_FIRE_INTERVAL : RANGED_FIRE_INTERVAL;
-          if (now - enemy.lastShot < interval) return;
+          const profile = getEnemyFireProfile(enemy);
+          if (!profile) return;
+          if (now - enemy.lastShot < profile.interval) return;
           const dx = player.x - enemy.x;
           const dy = player.y - enemy.y;
-          if (Math.hypot(dx, dy) > RANGED_ATTACK_RANGE) return;
+          if (Math.hypot(dx, dy) > profile.range) return;
 
           addProjectile(createEnemyProjectile(enemy, player));
           useGameStore.setState(state => ({

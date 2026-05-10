@@ -54,8 +54,22 @@ export const useGameLoop = (onGameOver: () => void) => {
   // Game loop
   useEffect(() => {
     const gameLoop = (timestamp: number) => {
-      // Calculate delta time
-      const deltaTime = (timestamp - lastFrameTimeRef.current) / 1000;
+      // The game can sit idle (tab in background, game-over screen, paused
+      // mid-render, etc.) for arbitrary amounts of time. We must NOT pass
+      // huge deltas into the simulation — they cause physics teleports
+      // (every enemy slammed into the player, projectiles flying off the
+      // map, gameTime jumping minutes). On the very first frame after a
+      // (re)mount, lastFrameTimeRef is 0 and `timestamp - 0` is the entire
+      // page-lifetime, which is the worst case. Establish the time origin
+      // and skip the simulation step on that frame.
+      if (lastFrameTimeRef.current === 0) {
+        lastFrameTimeRef.current = timestamp;
+        frameRef.current = requestAnimationFrame(gameLoop);
+        return;
+      }
+
+      const rawDelta = (timestamp - lastFrameTimeRef.current) / 1000;
+      const deltaTime = Math.min(0.05, rawDelta);
       lastFrameTimeRef.current = timestamp;
       
       // Update FPS counter
@@ -116,24 +130,34 @@ export const useGameLoop = (onGameOver: () => void) => {
         updateProjectiles(deltaTime);
 
         // Every enemy that has a fire profile periodically lobs a hostile
-        // projectile at the player. Each type has its own cadence/range so
-        // grunts shoot rarely and ranged/boss shoot often.
+        // projectile at the player. Each type has its own cadence/range
+        // so grunts shoot rarely and ranged/boss shoot often. We read the
+        // enemies/player fresh from the store here because updateEnemies
+        // just mutated them — the React closure values are one frame
+        // stale, and a stale `lastShot` would have us refire on enemies
+        // that already shot earlier in this very frame.
         const now = Date.now();
-        enemies.forEach(enemy => {
+        const liveEnemies = useGameStore.getState().enemies;
+        const livePlayer = useGameStore.getState().player;
+        const firedIds: string[] = [];
+        liveEnemies.forEach(enemy => {
           const profile = getEnemyFireProfile(enemy);
           if (!profile) return;
           if (now - enemy.lastShot < profile.interval) return;
-          const dx = player.x - enemy.x;
-          const dy = player.y - enemy.y;
+          const dx = livePlayer.x - enemy.x;
+          const dy = livePlayer.y - enemy.y;
           if (Math.hypot(dx, dy) > profile.range) return;
 
-          addProjectile(createEnemyProjectile(enemy, player));
+          addProjectile(createEnemyProjectile(enemy, livePlayer));
+          firedIds.push(enemy.id);
+        });
+        if (firedIds.length > 0) {
           useGameStore.setState(state => ({
             enemies: state.enemies.map(e =>
-              e.id === enemy.id ? { ...e, lastShot: now } : e
+              firedIds.includes(e.id) ? { ...e, lastShot: now } : e
             )
           }));
-        });
+        }
 
         // Check for collisions between hostile projectiles and the player.
         // Read fresh projectile state because we may have just added enemy bolts.

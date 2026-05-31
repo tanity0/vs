@@ -26,6 +26,9 @@ export const useGameLoop = (onGameOver: () => void) => {
   // and is reset whenever gameTime rolls back to ~0 (i.e. a fresh game).
   const consumedWavesRef = useRef(newConsumedWaves());
   const lastSeenGameTimeRef = useRef(0);
+  const prevLevelRef = useRef(1);
+  const prevCounterSuccessRef = useRef(0);
+  const prevHealthRef = useRef(0);
   
   // Game state
   const isPaused = useGameStore(state => state.isPaused);
@@ -54,7 +57,13 @@ export const useGameLoop = (onGameOver: () => void) => {
   const setGameTime = useGameStore(state => state.setGameTime);
   const updateGameStats = useGameStore(state => state.updateGameStats);
   const setCameraPosition = useGameStore(state => state.setCameraPosition);
-  
+  const spawnBurst = useGameStore(state => state.spawnBurst);
+  const spawnDamageNumber = useGameStore(state => state.spawnDamageNumber);
+  const spawnRing = useGameStore(state => state.spawnRing);
+  const spawnFlash = useGameStore(state => state.spawnFlash);
+  const spawnEffect = useGameStore(state => state.spawnEffect);
+  const updateEffects = useGameStore(state => state.updateEffects);
+
   // Game loop
   useEffect(() => {
     const gameLoop = (timestamp: number) => {
@@ -173,6 +182,12 @@ export const useGameLoop = (onGameOver: () => void) => {
           } else {
             const playerDied = damagePlayer(proj.damage);
             removeProjectile(proj.id);
+            spawnBurst(
+              player.x + player.width / 2,
+              player.y + player.height / 2,
+              '#ef4444',
+              5
+            );
             if (playerDied) {
               onGameOver();
             }
@@ -183,22 +198,46 @@ export const useGameLoop = (onGameOver: () => void) => {
         const projectileEnemyCollisions = checkProjectileEnemyCollisions(useGameStore.getState().projectiles, enemies);
         
         projectileEnemyCollisions.forEach(({ projectileId, enemyId, damage }) => {
-          const enemyKilled = damageEnemy(enemyId, damage);
-          
-          // Get the projectile
+          const enemyForFx = enemies.find(e => e.id === enemyId);
           const projectile = projectiles.find(p => p.id === projectileId);
-          
+          const enemyKilled = damageEnemy(enemyId, damage);
+
+          // Floating damage number at the enemy's body. Use the reflected
+          // flag to mark crit color (reflected bolts hit way harder).
+          if (enemyForFx) {
+            spawnDamageNumber(
+              enemyForFx.x + enemyForFx.width / 2,
+              enemyForFx.y,
+              damage,
+              !!projectile?.reflected
+            );
+          }
+
           // If the projectile isn't passthrough or the enemy was killed, remove the projectile
           if (projectile && (!projectile.passthrough || enemyKilled)) {
             removeProjectile(projectileId);
           }
-          
+
           // If enemy was killed, spawn pickups. VS-style drop table:
           //   - always an XP gem; its `value` becomes the gem tier.
           //   - rare chicken (HP), magnet, bomb. Elites/giantbats roll richer.
           if (enemyKilled) {
             const enemy = enemies.find(e => e.id === enemyId);
             if (enemy) {
+              // Death burst — colored by the enemy's identity for a satisfying pop.
+              const burstColor =
+                enemy.type === 'pumpkin' ? '#fb923c' :
+                enemy.type === 'giantbat' ? '#94a3b8' :
+                enemy.type === 'zombie' ? '#86efac' :
+                enemy.type === 'bat' ? '#475569' :
+                '#fef3c7';
+              spawnBurst(
+                enemy.x + enemy.width / 2,
+                enemy.y + enemy.height / 2,
+                burstColor,
+                enemy.type === 'pumpkin' || enemy.type === 'giantbat' ? 18 : 8
+              );
+
               addPickup({
                 id: `pickup-xp-${enemy.id}`,
                 x: enemy.x + enemy.width / 2 - 8,
@@ -245,8 +284,16 @@ export const useGameLoop = (onGameOver: () => void) => {
         const playerEnemyCollisions = checkPlayerEnemyCollisions(player, enemies);
         
         playerEnemyCollisions.forEach(enemy => {
+          const damageWasApplied = !player.invulnerable;
           const playerDied = damagePlayer(enemy.damage);
-          
+          if (damageWasApplied) {
+            spawnBurst(
+              player.x + player.width / 2,
+              player.y + player.height / 2,
+              '#ef4444',
+              6
+            );
+          }
           if (playerDied) {
             onGameOver();
           }
@@ -254,10 +301,69 @@ export const useGameLoop = (onGameOver: () => void) => {
         
         // Check for collisions between player and pickups
         const pickupCollisions = checkPlayerPickupCollisions(player, pickups);
-        
-        // Collect all pickups that collide with the player
+
         if (pickupCollisions.length > 0) {
           pickupCollisions.forEach(pickupId => {
+            const pk = pickups.find(p => p.id === pickupId);
+            if (pk) {
+              // Pickup-specific feedback. Gems get a small color-coded
+              // sparkle; heart/magnet/bomb get bolder bursts.
+              switch (pk.type) {
+                case 'experience': {
+                  const color = pk.value >= 5 ? '#fecaca' : pk.value >= 2 ? '#a7f3d0' : '#bfdbfe';
+                  spawnBurst(pk.x + 8, pk.y + 8, color, 4);
+                  break;
+                }
+                case 'health':
+                  spawnBurst(pk.x + 8, pk.y + 8, '#f87171', 10);
+                  spawnRing(
+                    player.x + player.width / 2,
+                    player.y + player.height / 2,
+                    8, 36, 'rgba(248,113,113,0.7)', 3, 380
+                  );
+                  break;
+                case 'magnet':
+                  // Animate every gem flying to the player as a trail before
+                  // they're swallowed in `collectPickup`.
+                  useGameStore.getState().pickups
+                    .filter(p => p.type === 'experience')
+                    .forEach(g => {
+                      spawnEffect({
+                        kind: 'trail',
+                        id: `fx-trail-${g.id}`,
+                        fromX: g.x + 8, fromY: g.y + 8,
+                        toX: player.x + player.width / 2,
+                        toY: player.y + player.height / 2,
+                        color: 'rgba(96,165,250,0.85)',
+                        createdAt: Date.now(),
+                        duration: 280
+                      });
+                    });
+                  spawnRing(
+                    player.x + player.width / 2,
+                    player.y + player.height / 2,
+                    8, 220, 'rgba(96,165,250,0.55)', 3, 320
+                  );
+                  break;
+                case 'bomb':
+                  spawnFlash('rgba(255,255,255,0.85)', 200);
+                  spawnRing(
+                    player.x + player.width / 2,
+                    player.y + player.height / 2,
+                    8, 700, 'rgba(253,224,71,0.85)', 6, 420
+                  );
+                  // Spawn a burst at every enemy slated to die
+                  useGameStore.getState().enemies
+                    .filter(e => e.type !== 'reaper')
+                    .forEach(e => spawnBurst(
+                      e.x + e.width / 2,
+                      e.y + e.height / 2,
+                      '#fde68a',
+                      6
+                    ));
+                  break;
+              }
+            }
             collectPickup(pickupId);
           });
         }
@@ -307,8 +413,59 @@ export const useGameLoop = (onGameOver: () => void) => {
             useGameStore.getState().removeEnemy(enemy.id);
           });
         }
+
+        // Tick visual effects (particles drift, damage numbers float, etc.)
+        updateEffects(deltaTime);
+
+        // Detect level-up edge: golden ring around the player.
+        const currentPlayer = useGameStore.getState().player;
+        if (currentPlayer.level > prevLevelRef.current) {
+          spawnRing(
+            currentPlayer.x + currentPlayer.width / 2,
+            currentPlayer.y + currentPlayer.height / 2,
+            10, 90, 'rgba(253,224,71,0.9)', 4, 520
+          );
+          spawnBurst(
+            currentPlayer.x + currentPlayer.width / 2,
+            currentPlayer.y + currentPlayer.height / 2,
+            '#fde68a',
+            18
+          );
+          prevLevelRef.current = currentPlayer.level;
+        } else if (currentPlayer.level < prevLevelRef.current) {
+          prevLevelRef.current = currentPlayer.level; // reset after game over
+        }
+
+        // Detect successful-counter edge: gold burst + ring.
+        if (currentPlayer.lastCounterSuccessTime > prevCounterSuccessRef.current) {
+          spawnRing(
+            currentPlayer.x + currentPlayer.width / 2,
+            currentPlayer.y + currentPlayer.height / 2,
+            12, 80, 'rgba(252,211,77,0.95)', 4, 420
+          );
+          spawnBurst(
+            currentPlayer.x + currentPlayer.width / 2,
+            currentPlayer.y + currentPlayer.height / 2,
+            '#fcd34d',
+            12
+          );
+          prevCounterSuccessRef.current = currentPlayer.lastCounterSuccessTime;
+        }
+
+        // Detect HP loss edge: red screen tint flash.
+        if (prevHealthRef.current === 0) {
+          prevHealthRef.current = currentPlayer.health;
+        } else if (currentPlayer.health < prevHealthRef.current) {
+          const lost = prevHealthRef.current - currentPlayer.health;
+          if (lost > 0.5) {
+            spawnFlash('rgba(220, 38, 38, 0.18)', 220);
+          }
+          prevHealthRef.current = currentPlayer.health;
+        } else {
+          prevHealthRef.current = currentPlayer.health;
+        }
       }
-      
+
       // Request next frame
       frameRef.current = requestAnimationFrame(gameLoop);
     };
@@ -345,6 +502,12 @@ export const useGameLoop = (onGameOver: () => void) => {
     setGameTime,
     updateGameStats,
     setCameraPosition,
+    spawnBurst,
+    spawnDamageNumber,
+    spawnRing,
+    spawnFlash,
+    spawnEffect,
+    updateEffects,
     onGameOver
   ]);
   

@@ -97,6 +97,14 @@ export interface Projectile {
   hitEnemies: string[];
   hostile: boolean;
   reflected: boolean;
+  // Optional motion modifiers. Axes set `gravity` so they arc upward then
+  // fall. Bibles use the orbit fields to circle the player continuously.
+  // `followsPlayer` snaps the projectile to the player every frame (garlic).
+  gravity?: number;
+  orbitRadius?: number;
+  orbitAngle?: number;
+  orbitSpeed?: number;
+  followsPlayer?: boolean;
 }
 
 // Pickup types
@@ -146,3 +154,57 @@ export interface GameBounds {
   width: number;
   height: number;
 }
+
+// Visual-only effects. The game loop spawns these and never reads them back;
+// only the renderer consumes them. They have no gameplay impact.
+export type VisualEffect =
+  | {
+      kind: 'particle';
+      id: string;
+      x: number; y: number;
+      vx: number; vy: number;
+      color: string;
+      size: number;
+      createdAt: number;
+      duration: number;
+      drag?: number;
+    }
+  | {
+      kind: 'damageNumber';
+      id: string;
+      x: number; y: number;
+      value: number;
+      color: string;
+      createdAt: number;
+      duration: number;
+      crit?: boolean;
+    }
+  | {
+      kind: 'ring';
+      id: string;
+      x: number; y: number;
+      startRadius: number;
+      endRadius: number;
+      color: string;
+      width: number;
+      createdAt: number;
+      duration: number;
+    }
+  | {
+      kind: 'flash';
+      id: string;
+      color: string;          // e.g. 'rgba(255,255,255,0.8)' — overlays whole screen
+      createdAt: number;
+      duration: number;
+    }
+  | {
+      kind: 'trail';
+      id: string;
+      // Animated line from (fromX,fromY) toward player; rendered as a fading
+      // streak that moves with the magnet pull.
+      fromX: number; fromY: number;
+      toX: number; toY: number;
+      color: string;
+      createdAt: number;
+      duration: number;
+    };

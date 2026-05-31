@@ -1,4 +1,4 @@
-import { Player, Enemy, Projectile, Pickup } from '../types/game';
+import { Player, Enemy, Projectile, Pickup, VisualEffect } from '../types/game';
 import { getEnemyColor } from './enemyUtils';
 
 // Counter ring visualization. Visible only while the counter window is open
@@ -57,6 +57,7 @@ interface RenderProps {
   enemies: Enemy[];
   projectiles: Projectile[];
   pickups: Pickup[];
+  effects: VisualEffect[];
   width: number;
   height: number;
   camera: { x: number; y: number };
@@ -64,14 +65,119 @@ interface RenderProps {
 
 export const renderGame = (
   ctx: CanvasRenderingContext2D,
-  { player, enemies, projectiles, pickups, width, height, camera }: RenderProps
+  { player, enemies, projectiles, pickups, effects, width, height, camera }: RenderProps
 ) => {
   ctx.clearRect(0, 0, width, height);
   drawForestBackground(ctx, width, height, camera);
+
+  // World-space effects under sprites (trails)
+  effects.forEach(e => {
+    if (e.kind === 'trail') drawTrailEffect(ctx, e, camera);
+  });
+
   pickups.forEach(pickup => drawPickup(ctx, pickup, camera));
   enemies.forEach(enemy => drawEnemy(ctx, enemy, camera));
   projectiles.forEach(projectile => drawProjectile(ctx, projectile, camera));
   drawPlayer(ctx, player, camera);
+
+  // World-space effects on top of sprites (particles, rings, damage numbers)
+  effects.forEach(e => {
+    if (e.kind === 'particle') drawParticleEffect(ctx, e, camera);
+    else if (e.kind === 'ring') drawRingEffect(ctx, e, camera);
+    else if (e.kind === 'damageNumber') drawDamageNumberEffect(ctx, e, camera);
+  });
+
+  // Screen-space flashes overlay everything
+  effects.forEach(e => {
+    if (e.kind === 'flash') drawFlashEffect(ctx, e, width, height);
+  });
+};
+
+const drawParticleEffect = (
+  ctx: CanvasRenderingContext2D,
+  e: Extract<VisualEffect, { kind: 'particle' }>,
+  camera: { x: number; y: number }
+) => {
+  const t = (Date.now() - e.createdAt) / e.duration;
+  const alpha = Math.max(0, 1 - t);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = e.color;
+  ctx.beginPath();
+  ctx.arc(e.x - camera.x, e.y - camera.y, e.size, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+};
+
+const drawRingEffect = (
+  ctx: CanvasRenderingContext2D,
+  e: Extract<VisualEffect, { kind: 'ring' }>,
+  camera: { x: number; y: number }
+) => {
+  const t = Math.min(1, (Date.now() - e.createdAt) / e.duration);
+  const radius = e.startRadius + (e.endRadius - e.startRadius) * t;
+  const alpha = 1 - t;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = e.color;
+  ctx.lineWidth = e.width;
+  ctx.beginPath();
+  ctx.arc(e.x - camera.x, e.y - camera.y, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+};
+
+const drawDamageNumberEffect = (
+  ctx: CanvasRenderingContext2D,
+  e: Extract<VisualEffect, { kind: 'damageNumber' }>,
+  camera: { x: number; y: number }
+) => {
+  const t = (Date.now() - e.createdAt) / e.duration;
+  const alpha = Math.max(0, 1 - t);
+  const scale = e.crit ? 1.35 : 1;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `${e.crit ? 'bold ' : ''}${Math.round(12 * scale)}px ui-rounded, -apple-system, system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#000';
+  ctx.fillText(String(e.value), e.x - camera.x + 1, e.y - camera.y + 1);
+  ctx.fillStyle = e.color;
+  ctx.fillText(String(e.value), e.x - camera.x, e.y - camera.y);
+  ctx.restore();
+};
+
+const drawTrailEffect = (
+  ctx: CanvasRenderingContext2D,
+  e: Extract<VisualEffect, { kind: 'trail' }>,
+  camera: { x: number; y: number }
+) => {
+  const t = Math.min(1, (Date.now() - e.createdAt) / e.duration);
+  const cx = e.fromX + (e.toX - e.fromX) * t;
+  const cy = e.fromY + (e.toY - e.fromY) * t;
+  ctx.save();
+  ctx.globalAlpha = 1 - t;
+  ctx.strokeStyle = e.color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(e.fromX - camera.x, e.fromY - camera.y);
+  ctx.lineTo(cx - camera.x, cy - camera.y);
+  ctx.stroke();
+  ctx.restore();
+};
+
+const drawFlashEffect = (
+  ctx: CanvasRenderingContext2D,
+  e: Extract<VisualEffect, { kind: 'flash' }>,
+  width: number,
+  height: number
+) => {
+  const t = (Date.now() - e.createdAt) / e.duration;
+  const alpha = Math.max(0, 1 - t);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = e.color;
+  ctx.fillRect(0, 0, width, height);
+  ctx.restore();
 };
 
 // Mad Forest backdrop. We paint a green ground, then a grid of darker
@@ -437,6 +543,8 @@ const drawProjectile = (
   projectile: Projectile,
   camera: { x: number; y: number }
 ) => {
+  // Scheduled projectiles (whip chain's second slash) are inactive — skip.
+  if (projectile.createdAt > Date.now()) return;
   if (projectile.reflected) {
     const cx = projectile.x + projectile.width / 2 - camera.x;
     const cy = projectile.y + projectile.height / 2 - camera.y;

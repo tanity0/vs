@@ -3,7 +3,7 @@ import { generateUpgradeOptions } from '../utils/upgradeUtils';
 import {
   Player, Enemy, Projectile, Pickup, GameStats,
   InputState, UpgradeOption, GameBounds, CharacterClass,
-  Weapon, WeaponType
+  Weapon, WeaponType, VisualEffect
 } from '../types/game';
 import { getStartingWeapons, getWeaponDisplayName } from '../utils/weaponUtils';
 
@@ -23,9 +23,9 @@ const newWeaponTemplate = (type: WeaponType): Weapon => {
     case 'axe':
       return { id, name, type, damage: 14, cooldown: 1500, lastFired: 0, level: 1, projectileSpeed: 280, projectileSize: 22 };
     case 'bible':
-      return { id, name, type, damage: 9, cooldown: 1800, lastFired: 0, level: 1, projectileSize: 18 };
+      return { id, name, type, damage: 9, cooldown: 500, lastFired: 0, level: 1, projectileSize: 18 };
     case 'garlic':
-      return { id, name, type, damage: 4, cooldown: 800, lastFired: 0, level: 1, area: 110 };
+      return { id, name, type, damage: 3, cooldown: 300, lastFired: 0, level: 1, area: 110 };
     default:
       return { id, name, type, damage: 8, cooldown: 700, lastFired: 0, level: 1, projectileSpeed: 320, projectileSize: 14 };
   }
@@ -68,6 +68,7 @@ interface GameState {
   gameBounds: GameBounds;
   gameStats: GameStats;
   characterClass: CharacterClass;
+  effects: VisualEffect[];
   camera: {
     x: number;
     y: number;
@@ -110,6 +111,14 @@ interface GameState {
   updateGameStats: (stats: Partial<GameStats>) => void;
   resetGame: (characterClass: string) => void;
   setCameraPosition: (x: number, y: number) => void;
+
+  // Visual effects (renderer-only; no gameplay impact)
+  spawnEffect: (effect: VisualEffect) => void;
+  spawnBurst: (x: number, y: number, color: string, count?: number) => void;
+  spawnDamageNumber: (x: number, y: number, value: number, crit?: boolean) => void;
+  spawnRing: (x: number, y: number, startRadius: number, endRadius: number, color: string, width?: number, duration?: number) => void;
+  spawnFlash: (color: string, duration?: number) => void;
+  updateEffects: (deltaTime: number) => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -153,6 +162,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     maxLevel: 1
   },
   characterClass: 'warrior',
+  effects: [],
   camera: {
     x: 0,
     y: 0
@@ -584,36 +594,68 @@ export const useGameStore = create<GameState>((set, get) => ({
   
   updateProjectiles: (deltaTime) => {
     const currentTime = Date.now();
-    
+
     set(state => {
       const { projectiles, player, gameBounds } = state;
-
       const cullRadius = Math.max(gameBounds.width, gameBounds.height);
+      const playerCX = player.x + player.width / 2;
+      const playerCY = player.y + player.height / 2;
+
       const updatedProjectiles = projectiles
         .filter(p => {
-          // Remove expired projectiles
-          if (currentTime - p.createdAt > p.duration) {
-            return false;
-          }
-          // Cull projectiles that drift far from the camera (world is
-          // effectively infinite so we can't use absolute bounds).
-          const dx = p.x - player.x;
-          const dy = p.y - player.y;
-          if (Math.hypot(dx, dy) > cullRadius) return false;
+          if (currentTime - p.createdAt > p.duration) return false;
+          // Garlic / bibles follow the player and shouldn't be culled by
+          // their static spawn position; check distance from player.
+          const px = p.x + p.width / 2;
+          const py = p.y + p.height / 2;
+          if (Math.hypot(px - playerCX, py - playerCY) > cullRadius) return false;
           return true;
         })
         .map(p => {
-          // Update projectile position
-          const newX = p.x + p.direction.x * p.speed * deltaTime;
-          const newY = p.y + p.direction.y * p.speed * deltaTime;
-          
+          // Whip chain: scheduled slashes (createdAt in the future) follow
+          // the player so they land at the player's CURRENT position when
+          // they activate, not where the player was when the chain started.
+          if (p.weaponType === 'whip' && currentTime < p.createdAt) {
+            const facingLeft = p.direction.x < 0;
+            const slashHeight = p.height;
+            return {
+              ...p,
+              x: facingLeft ? playerCX - p.width : playerCX,
+              y: playerCY - slashHeight / 2
+            };
+          }
+          // Orbital motion (bibles): position relative to the player using
+          // a continuously-updated angle. Doesn't use direction/speed.
+          if (p.orbitRadius !== undefined && p.orbitAngle !== undefined) {
+            const angle = p.orbitAngle + (p.orbitSpeed ?? 0) * deltaTime;
+            return {
+              ...p,
+              orbitAngle: angle,
+              x: playerCX + Math.cos(angle) * p.orbitRadius - p.width / 2,
+              y: playerCY + Math.sin(angle) * p.orbitRadius - p.height / 2
+            };
+          }
+          // Aura that snaps to player (garlic)
+          if (p.followsPlayer) {
+            return {
+              ...p,
+              x: playerCX - p.width / 2,
+              y: playerCY - p.height / 2
+            };
+          }
+          // Ballistic motion with optional gravity (axes arc upward, fall)
+          let dir = p.direction;
+          if (p.gravity) {
+            dir = { x: dir.x, y: dir.y + p.gravity * deltaTime };
+          }
           return {
             ...p,
-            x: newX,
-            y: newY
+            direction: dir,
+            x: p.x + dir.x * p.speed * deltaTime,
+            y: p.y + dir.y * p.speed * deltaTime
           };
         });
-      
+
       return { projectiles: updatedProjectiles };
     });
   },
@@ -758,6 +800,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           maxLevel: 1
         },
         characterClass: validClass,
+        effects: [],
         camera: {
           x: 0,
           y: 0
@@ -769,5 +812,119 @@ export const useGameStore = create<GameState>((set, get) => ({
   setCameraPosition: (x, y) => {
     // Infinite world: the camera follows the player one-to-one with no clamp.
     set({ camera: { x, y } });
+  },
+
+  spawnEffect: (effect) => {
+    // Cap the effect pool so a stray bug can't degrade the framerate.
+    set(state => {
+      const next = [...state.effects, effect];
+      if (next.length > 400) next.splice(0, next.length - 400);
+      return { effects: next };
+    });
+  },
+
+  spawnBurst: (x, y, color, count = 6) => {
+    const now = Date.now();
+    const fresh: VisualEffect[] = [];
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 60 + Math.random() * 120;
+      fresh.push({
+        kind: 'particle',
+        id: `fx-burst-${now}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color,
+        size: 2 + Math.random() * 2,
+        createdAt: now,
+        duration: 280 + Math.random() * 160,
+        drag: 4
+      });
+    }
+    set(state => {
+      const next = [...state.effects, ...fresh];
+      if (next.length > 400) next.splice(0, next.length - 400);
+      return { effects: next };
+    });
+  },
+
+  spawnDamageNumber: (x, y, value, crit = false) => {
+    const now = Date.now();
+    const effect: VisualEffect = {
+      kind: 'damageNumber',
+      id: `fx-dmg-${now}-${Math.random().toString(36).slice(2, 6)}`,
+      x: x + (Math.random() - 0.5) * 18,
+      y: y + (Math.random() - 0.5) * 8,
+      value: Math.max(1, Math.round(value)),
+      color: crit ? '#fbbf24' : '#fef9c3',
+      createdAt: now,
+      duration: 720,
+      crit
+    };
+    set(state => {
+      const next = [...state.effects, effect];
+      if (next.length > 400) next.splice(0, next.length - 400);
+      return { effects: next };
+    });
+  },
+
+  spawnRing: (x, y, startRadius, endRadius, color, width = 3, duration = 500) => {
+    const now = Date.now();
+    set(state => ({
+      effects: [
+        ...state.effects,
+        {
+          kind: 'ring',
+          id: `fx-ring-${now}-${Math.random().toString(36).slice(2, 6)}`,
+          x, y, startRadius, endRadius, color, width,
+          createdAt: now,
+          duration
+        }
+      ]
+    }));
+  },
+
+  spawnFlash: (color, duration = 220) => {
+    const now = Date.now();
+    set(state => ({
+      effects: [
+        ...state.effects,
+        {
+          kind: 'flash',
+          id: `fx-flash-${now}`,
+          color,
+          createdAt: now,
+          duration
+        }
+      ]
+    }));
+  },
+
+  updateEffects: (deltaTime) => {
+    const now = Date.now();
+    set(state => {
+      const live: VisualEffect[] = [];
+      for (const e of state.effects) {
+        if (now - e.createdAt > e.duration) continue;
+        if (e.kind === 'particle') {
+          const drag = e.drag ?? 0;
+          const decay = drag > 0 ? Math.exp(-drag * deltaTime) : 1;
+          live.push({
+            ...e,
+            x: e.x + e.vx * deltaTime,
+            y: e.y + e.vy * deltaTime,
+            vx: e.vx * decay,
+            vy: e.vy * decay
+          });
+        } else if (e.kind === 'damageNumber') {
+          // Damage numbers drift upward and slow over time
+          live.push({ ...e, y: e.y - 40 * deltaTime });
+        } else {
+          live.push(e);
+        }
+      }
+      return { effects: live };
+    });
   }
 }));

@@ -19,12 +19,14 @@ export const checkProjectileEnemyCollisions = (
   enemies: Enemy[]
 ): { projectileId: string; enemyId: string; damage: number }[] => {
   const collisions: { projectileId: string; enemyId: string; damage: number }[] = [];
+  const now = Date.now();
 
   projectiles.forEach(projectile => {
     // Hostile projectiles only damage enemies once they've been reflected
-    if (projectile.hostile) {
-      return;
-    }
+    if (projectile.hostile) return;
+    // Scheduled-but-not-yet-active projectiles (e.g. the second slash of a
+    // whip chain) shouldn't deal damage until their start time arrives.
+    if (projectile.createdAt > now) return;
     enemies.forEach(enemy => {
       // Skip if already hit by this projectile (for passthrough weapons)
       if (projectile.hitEnemies.includes(enemy.id)) {

@@ -13,6 +13,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ width, height }) => {
   const enemies = useGameStore(state => state.enemies);
   const projectiles = useGameStore(state => state.projectiles);
   const pickups = useGameStore(state => state.pickups);
+  const effects = useGameStore(state => state.effects);
   const isPaused = useGameStore(state => state.isPaused);
   const camera = useGameStore(state => state.camera);
   
@@ -55,11 +56,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ width, height }) => {
       enemies,
       projectiles,
       pickups,
+      effects,
       width,
       height,
       camera
     });
-  }, [player, enemies, projectiles, pickups, width, height, isPaused, camera]);
+  }, [player, enemies, projectiles, pickups, effects, width, height, isPaused, camera]);
   
   return (
     <canvas

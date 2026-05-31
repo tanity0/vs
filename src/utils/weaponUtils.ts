@@ -55,8 +55,8 @@ export const getStartingWeapons = (characterClass: CharacterClass): Weapon[] => 
         id: 'weapon-garlic',
         name: 'ニンニク',
         type: 'garlic',
-        damage: 4,
-        cooldown: 800,
+        damage: 3,
+        cooldown: 300,
         lastFired: 0,
         level: 1,
         area: 110
@@ -80,6 +80,41 @@ export const getStartingWeapons = (characterClass: CharacterClass): Weapon[] => 
 // Whip slash counter — global flip flag so the whip alternates left/right
 // like in VS (Antonio's iconic forward/back slash cycle).
 let whipSwingLeft = false;
+
+// Helper: build a single horizontal slash slab. `delay` shifts when the
+// slash becomes active/visible (used for the chained second slash).
+const buildWhipSlash = (
+  player: Player,
+  weapon: Weapon,
+  facingLeft: boolean,
+  delay: number,
+  spawnedAt: number
+): Projectile => {
+  const area = (weapon.area || 130) + 20 * (weapon.level - 1);
+  const slashHeight = 56 + 6 * (weapon.level - 1);
+  const px = player.x + player.width / 2;
+  const py = player.y + player.height / 2;
+  return {
+    id: `proj-${weapon.id}-${spawnedAt}-${facingLeft ? 'L' : 'R'}-${delay}`,
+    x: facingLeft ? px - area : px,
+    y: py - slashHeight / 2,
+    width: area,
+    height: slashHeight,
+    speed: 0,
+    damage: weapon.damage,
+    direction: { x: facingLeft ? -1 : 1, y: 0 },
+    weaponType: 'whip',
+    // createdAt in the future delays both the visual fade-in (see renderer)
+    // and the collision check (gated below in useGameLoop via hitEnemies).
+    duration: (weapon.duration || 230) + delay,
+    createdAt: spawnedAt + delay,
+    passthrough: true,
+    hitEnemies: [],
+    hostile: false,
+    reflected: false
+  };
+};
+
 
 // Per-weapon kind, return the projectiles fired this tick (cooldown-aware).
 export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Projectile[] => {
@@ -140,28 +175,32 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
     }
 
     case 'axe': {
-      // Axes arc upward off the player. Each fire spawns level+2 of them
-      // with random upward velocities — VS feel without simulating gravity.
-      const count = 2 + weapon.level;
+      // Throw axes upward; gravity pulls them back down (proper parabola).
+      // Each axe pierces. Level adds more axes per throw and a faster cycle.
+      const count = 1 + Math.floor(weapon.level / 2);
+      const baseUp = -1.1; // initial upward unit velocity
       for (let i = 0; i < count; i++) {
-        const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.6;
-        const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+        const xKick = ((i - (count - 1) / 2) * 0.35) + (Math.random() - 0.5) * 0.4;
         projectiles.push({
           id: `proj-${weapon.id}-${now}-${i}`,
           x: player.x + player.width / 2 - (weapon.projectileSize || 22) / 2,
           y: player.y + player.height / 2 - (weapon.projectileSize || 22) / 2,
           width: weapon.projectileSize || 22,
           height: weapon.projectileSize || 22,
-          speed: weapon.projectileSpeed || 280,
+          speed: weapon.projectileSpeed || 320,
           damage: weapon.damage,
-          direction: dir,
+          // direction.y is negative (upward) — gravity adds positive y over
+          // time, flipping it. The exact magnitude isn't normalized; the
+          // simulator uses direction*speed*dt directly.
+          direction: { x: xKick, y: baseUp },
           weaponType: weapon.type,
-          duration: 2200,
+          duration: 2400,
           createdAt: now,
           passthrough: true,
           hitEnemies: [],
           hostile: false,
-          reflected: false
+          reflected: false,
+          gravity: 4.2
         });
       }
       break;
@@ -215,53 +254,52 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
     }
 
     case 'whip': {
-      // Classic Antonio whip: a horizontal AoE slab that flips left/right
-      // each fire. Higher levels add a second slab on the same tick.
-      const facingRight = player.lastDirection
-        ? player.lastDirection.x >= 0
-        : player.direction !== 'left';
+      // VS-style whip: each fire is a CHAIN of slashes (default 2). The
+      // chain alternates left/right per fire so over time both sides are
+      // covered. At Lv4+ the chain becomes 3 slashes. Each subsequent
+      // slash in the chain is offset by a short delay so the renderer
+      // shows them as two consecutive flashes.
       whipSwingLeft = !whipSwingLeft;
-      const area = (weapon.area || 130) + 20 * (weapon.level - 1);
-      const slashHeight = 60 + 6 * (weapon.level - 1);
-      const buildSlash = (left: boolean) => {
-        const px = player.x + player.width / 2;
-        const py = player.y + player.height / 2;
-        return {
-          id: `proj-${weapon.id}-${now}-${left ? 'L' : 'R'}`,
-          x: left ? px - area : px,
-          y: py - slashHeight / 2,
-          width: area,
-          height: slashHeight,
-          speed: 0,
-          damage: weapon.damage,
-          direction: { x: left ? -1 : 1, y: 0 },
-          weaponType: weapon.type,
-          duration: weapon.duration || 220,
-          createdAt: now,
-          passthrough: true,
-          hitEnemies: [],
-          hostile: false,
-          reflected: false
-        };
-      };
-
-      // Level 1 → one slash, alternating sides. Level 4+ → both sides at once.
-      if (weapon.level >= 4) {
-        projectiles.push(buildSlash(true));
-        projectiles.push(buildSlash(false));
-      } else {
-        projectiles.push(buildSlash(facingRight ? whipSwingLeft : !whipSwingLeft));
+      const facingLeftBias = whipSwingLeft;
+      const chain = weapon.level >= 4 ? 3 : 2;
+      const stride = 120;
+      for (let i = 0; i < chain; i++) {
+        // Alternate sides within the chain so a 2-chain hits left then right.
+        const left = (i % 2 === 0) ? facingLeftBias : !facingLeftBias;
+        projectiles.push(buildWhipSlash(player, weapon, left, i * stride, now));
       }
       break;
     }
 
     case 'bible': {
-      // Orbiting books — visualized by recreating positions every fire.
-      const count = 2 + weapon.level;
-      const radius = 70 + 4 * weapon.level;
+      // True orbital weapon. Books circle the player continuously via the
+      // orbit fields; updateProjectiles recomputes their position each
+      // frame. We only respawn the orbit when the player has fewer bibles
+      // alive than the expected level-derived count (e.g. after death or
+      // when the weapon levels up). Otherwise we no-op so the cooldown
+      // doesn't keep doubling the books.
+      const expected = 2 + weapon.level;
+      const radius = 70 + 5 * weapon.level;
       const size = weapon.projectileSize || 18;
-      for (let i = 0; i < count; i++) {
-        const angle = (i / count) * Math.PI * 2 + now / 600;
+      // Effectively-permanent orbit. We never expire on duration; the only
+      // way to despawn is the explicit cleanup at level-up below.
+      const lifetime = 60_000;
+      const aliveBibles = useGameStore.getState().projectiles
+        .filter(pp => pp.weaponType === 'bible' && pp.orbitRadius !== undefined)
+        .length;
+      if (aliveBibles >= expected) {
+        // Another revolution is already in flight; bump the cooldown so we
+        // don't re-check every frame, but don't spawn duplicates.
+        break;
+      }
+      // Despawn any leftover stale bibles before spawning the new set.
+      useGameStore.setState(state => ({
+        projectiles: state.projectiles.filter(
+          pp => !(pp.weaponType === 'bible' && pp.orbitRadius !== undefined)
+        )
+      }));
+      for (let i = 0; i < expected; i++) {
+        const angle = (i / expected) * Math.PI * 2;
         projectiles.push({
           id: `proj-${weapon.id}-${now}-${i}`,
           x: player.x + player.width / 2 + Math.cos(angle) * radius - size / 2,
@@ -272,21 +310,31 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
           damage: weapon.damage,
           direction: { x: 0, y: 0 },
           weaponType: weapon.type,
-          duration: 500,
+          duration: lifetime,
           createdAt: now,
           passthrough: true,
           hitEnemies: [],
           hostile: false,
-          reflected: false
+          reflected: false,
+          orbitRadius: radius,
+          orbitAngle: angle,
+          orbitSpeed: 5 // rad/s; ~0.8 revolutions per second
         });
       }
       break;
     }
 
     case 'garlic': {
-      // Aura around the player. Tick fires every cooldown; the projectile
-      // lifetime exceeds the cooldown so coverage stays continuous.
-      const area = (weapon.area || 110) + 12 * (weapon.level - 1);
+      // Persistent aura that snaps to the player every frame. We respawn
+      // it each cooldown so the hit-list resets and the same enemy gets
+      // damage ticks (otherwise hitEnemies would lock out repeat hits).
+      const area = (weapon.area || 110) + 14 * (weapon.level - 1);
+      // Clear stale auras first so we never stack two at once.
+      useGameStore.setState(state => ({
+        projectiles: state.projectiles.filter(
+          pp => !(pp.weaponType === 'garlic' && pp.followsPlayer)
+        )
+      }));
       projectiles.push({
         id: `proj-${weapon.id}-${now}`,
         x: player.x + player.width / 2 - area / 2,
@@ -297,12 +345,13 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
         damage: weapon.damage,
         direction: { x: 0, y: 0 },
         weaponType: weapon.type,
-        duration: weapon.cooldown + 60,
+        duration: weapon.cooldown + 80,
         createdAt: now,
         passthrough: true,
         hitEnemies: [],
         hostile: false,
-        reflected: false
+        reflected: false,
+        followsPlayer: true
       });
       break;
     }

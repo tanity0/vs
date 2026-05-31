@@ -48,6 +48,12 @@ export interface Enemy {
   experienceValue: number;
   lastHit: number;
   lastShot: number;
+  // Knockback state. While knockbackUntil is in the future the enemy is
+  // pushed by (knockbackVx, knockbackVy) instead of chasing the player.
+  // All three are absent on most enemies most of the time.
+  knockbackUntil?: number;
+  knockbackVx?: number;
+  knockbackVy?: number;
 }
 
 export type EnemyType =

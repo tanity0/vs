@@ -40,6 +40,15 @@ export const COUNTER_COOLDOWN = 420; // ms between counters (anti-spam)
 // barrage can be turned back in full. No hard cap — the cooldown still
 // kicks in once the chain finally lapses.
 export const COUNTER_EXTEND_PER_HIT = 200;
+
+// Counter knockback (additional effect on top of the bullet reflect).
+// At the moment the counter is triggered, every enemy within
+// KNOCKBACK_RADIUS of the player is pushed outward at KNOCKBACK_SPEED
+// (scaled by distance falloff), with the velocity decaying linearly to
+// zero over KNOCKBACK_DURATION. Reapers are immune.
+export const KNOCKBACK_RADIUS = 180;
+export const KNOCKBACK_SPEED = 600;
+export const KNOCKBACK_DURATION = 280;
 export const REFLECT_DAMAGE_MULTIPLIER = 12.0;
 export const REFLECT_SPEED_MULTIPLIER = 1.8;
 
@@ -275,19 +284,49 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
   
   triggerCounter: () => {
+    const now = Date.now();
+    const { player } = get();
+    // Respect cooldown — no counter, no knockback, no window.
+    if (now < player.counterCooldownEnd) return;
+
+    const pcx = player.x + player.width / 2;
+    const pcy = player.y + player.height / 2;
+
+    // Open the counter window AND knock back nearby enemies in the same
+    // commit. The knockback is purely positional — no damage, no XP, no
+    // kills. Reaper is immune.
     set(state => {
-      const { player } = state;
-      const now = Date.now();
-      // Respect cooldown
-      if (now < player.counterCooldownEnd) return {};
+      const knockedEnemies = state.enemies.map(enemy => {
+        if (enemy.type === 'reaper') return enemy;
+        const ecx = enemy.x + enemy.width / 2;
+        const ecy = enemy.y + enemy.height / 2;
+        const dx = ecx - pcx;
+        const dy = ecy - pcy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > KNOCKBACK_RADIUS) return enemy;
+        const norm = Math.max(0.001, dist);
+        // Distance falloff: dead-center = full speed, edge = half speed.
+        const falloff = 1 - dist / KNOCKBACK_RADIUS;
+        const speed = KNOCKBACK_SPEED * (0.5 + falloff * 0.5);
+        return {
+          ...enemy,
+          knockbackVx: (dx / norm) * speed,
+          knockbackVy: (dy / norm) * speed,
+          knockbackUntil: now + KNOCKBACK_DURATION
+        };
+      });
       return {
+        enemies: knockedEnemies,
         player: {
-          ...player,
+          ...state.player,
           counterWindowEnd: now + COUNTER_WINDOW,
           counterCooldownEnd: now + COUNTER_WINDOW + COUNTER_COOLDOWN
         }
       };
     });
+
+    // Shockwave ring to telegraph the push.
+    get().spawnRing(pcx, pcy, 14, KNOCKBACK_RADIUS, 'rgba(252, 211, 77, 0.85)', 4, 320);
   },
 
   damagePlayer: (amount) => {
@@ -541,8 +580,21 @@ export const useGameStore = create<GameState>((set, get) => ({
   updateEnemies: (deltaTime) => {
     set(state => {
       const { enemies, player } = state;
+      const now = Date.now();
 
       const updatedEnemies = enemies.map(enemy => {
+        // Knockback overrides chase AI: while it's active, slide outward
+        // with linearly-decaying velocity instead of seeking the player.
+        if (enemy.knockbackUntil && now < enemy.knockbackUntil) {
+          const remaining = enemy.knockbackUntil - now;
+          const decay = Math.max(0, remaining / KNOCKBACK_DURATION); // 1 → 0
+          return {
+            ...enemy,
+            x: enemy.x + (enemy.knockbackVx ?? 0) * decay * deltaTime,
+            y: enemy.y + (enemy.knockbackVy ?? 0) * decay * deltaTime
+          };
+        }
+
         // Plants are nearly stationary — they shuffle slightly toward the
         // player but mostly hold ground and spit seeds. Everything else
         // does the standard VS straight-line chase.

@@ -34,10 +34,14 @@ const newWeaponTemplate = (type: WeaponType): Weapon => {
 // Counter-on-release tuning. The counter window opens the moment the player
 // lifts their finger (or presses Space on PC) and stays open briefly. Any
 // hostile projectile that hits the player during the window is reflected.
-export const COUNTER_WINDOW = 240; // ms the window stays open after trigger
+export const COUNTER_WINDOW = 400; // ms the window stays open after trigger
 export const COUNTER_COOLDOWN = 420; // ms between counters (anti-spam)
-export const REFLECT_DAMAGE_MULTIPLIER = 2.5;
-export const REFLECT_SPEED_MULTIPLIER = 1.4;
+// Each successful reflect refreshes the window by this much so a chained
+// barrage can be turned back in full. No hard cap — the cooldown still
+// kicks in once the chain finally lapses.
+export const COUNTER_EXTEND_PER_HIT = 200;
+export const REFLECT_DAMAGE_MULTIPLIER = 5.0;
+export const REFLECT_SPEED_MULTIPLIER = 1.8;
 
 // Player base stats tuned to feel like Vampire Survivors' Antonio: slower
 // than the previous build (so weapons matter more), modest HP, small body.

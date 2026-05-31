@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { useGameStore, INVULN_MS } from '../store/gameStore';
+import {
+  useGameStore,
+  INVULN_MS,
+  COUNTER_EXTEND_PER_HIT
+} from '../store/gameStore';
 import {
   checkProjectileEnemyCollisions,
   checkPlayerEnemyCollisions,
@@ -176,8 +180,18 @@ export const useGameLoop = (onGameOver: () => void) => {
           const currentPlayer = useGameStore.getState().player;
           if (now <= currentPlayer.counterWindowEnd) {
             reflectProjectile(proj.id);
+            // Each successful reflect refreshes the window so a barrage
+            // can be turned back fully. The cooldown still gates a NEW
+            // counter trigger once the chain finally lapses.
             useGameStore.setState(state => ({
-              player: { ...state.player, lastCounterSuccessTime: now }
+              player: {
+                ...state.player,
+                counterWindowEnd: Math.max(
+                  state.player.counterWindowEnd,
+                  now + COUNTER_EXTEND_PER_HIT
+                ),
+                lastCounterSuccessTime: now
+              }
             }));
           } else {
             const playerDied = damagePlayer(proj.damage);

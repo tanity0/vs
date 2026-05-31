@@ -8,6 +8,12 @@ permissions:
   pages: write
   id-token: write
 
+# Allow only one concurrent deployment; queue new pushes and don't cancel
+# in-progress runs (so a fresh commit while a deploy is mid-flight just waits).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,14 +27,11 @@ jobs:
         with: { path: ./dist }
 
   deploy:
-  needs: build
-  runs-on: ubuntu-latest
-  permissions:
-    pages: write          # 👈 ここは既存を残す
-    id-token: write
-  environment:            # 追加 ---------
-    name: github-pages    #  🔴 必須
-    url: ${{ steps.deployment.outputs.page_url }}
-  steps:
-    - id: deployment
-      uses: actions/deploy-pages@v4
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

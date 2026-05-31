@@ -42,11 +42,11 @@ export const COUNTER_COOLDOWN = 420; // ms between counters (anti-spam)
 export const COUNTER_EXTEND_PER_HIT = 200;
 
 // Counter knockback (additional effect on top of the bullet reflect).
-// At the moment the counter is triggered, every enemy within
-// KNOCKBACK_RADIUS of the player is pushed outward at KNOCKBACK_SPEED
-// (scaled by distance falloff), with the velocity decaying linearly to
-// zero over KNOCKBACK_DURATION. Reapers are immune.
-export const KNOCKBACK_RADIUS = 110;
+// Two radii: HIT_RADIUS is where enemies actually get pushed; RING_RADIUS
+// is the visual telegraph (wider). Keeping the telegraph wide lets the
+// player read the attack while the actual catch zone stays disciplined.
+export const KNOCKBACK_HIT_RADIUS = 90;
+export const KNOCKBACK_RING_RADIUS = 180;
 export const KNOCKBACK_SPEED = 600;
 export const KNOCKBACK_DURATION = 280;
 export const REFLECT_DAMAGE_MULTIPLIER = 12.0;
@@ -303,10 +303,10 @@ export const useGameStore = create<GameState>((set, get) => ({
         const dx = ecx - pcx;
         const dy = ecy - pcy;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > KNOCKBACK_RADIUS) return enemy;
+        if (dist > KNOCKBACK_HIT_RADIUS) return enemy;
         const norm = Math.max(0.001, dist);
         // Distance falloff: dead-center = full speed, edge = half speed.
-        const falloff = 1 - dist / KNOCKBACK_RADIUS;
+        const falloff = 1 - dist / KNOCKBACK_HIT_RADIUS;
         const speed = KNOCKBACK_SPEED * (0.5 + falloff * 0.5);
         return {
           ...enemy,
@@ -325,8 +325,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       };
     });
 
-    // Shockwave ring to telegraph the push.
-    get().spawnRing(pcx, pcy, 14, KNOCKBACK_RADIUS, 'rgba(252, 211, 77, 0.85)', 4, 320);
+    // Shockwave ring sized to RING_RADIUS — wider than the hit zone so the
+    // counter swing reads as a big sweep visually.
+    get().spawnRing(pcx, pcy, 14, KNOCKBACK_RING_RADIUS, 'rgba(252, 211, 77, 0.85)', 4, 320);
   },
 
   damagePlayer: (amount) => {

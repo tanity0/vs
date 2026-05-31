@@ -291,6 +291,44 @@ const drawPlayer = (
   drawCounterShield(ctx, player, camera);
 };
 
+// Tiny bat silhouette that floats above bosses. Drawn with a subtle bob so
+// it animates without depending on per-frame state.
+const drawBossMarker = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  topY: number,
+  glowColor: string
+) => {
+  const bob = Math.sin(Date.now() / 220) * 2;
+  const baseY = topY - 10 + bob;
+  ctx.save();
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = '#0f0f14';
+  // Body
+  ctx.beginPath();
+  ctx.ellipse(cx, baseY, 3, 2.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Wings — two stubby triangles. Tip apex is offset to make them readable
+  // even at 1× zoom.
+  ctx.beginPath();
+  ctx.moveTo(cx - 2, baseY);
+  ctx.lineTo(cx - 9, baseY - 3);
+  ctx.lineTo(cx - 5, baseY + 1);
+  ctx.closePath();
+  ctx.moveTo(cx + 2, baseY);
+  ctx.lineTo(cx + 9, baseY - 3);
+  ctx.lineTo(cx + 5, baseY + 1);
+  ctx.closePath();
+  ctx.fill();
+  // Eye spark
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = glowColor;
+  ctx.fillRect(cx - 1, baseY - 1, 1, 1);
+  ctx.fillRect(cx + 1, baseY - 1, 1, 1);
+  ctx.restore();
+};
+
 const drawHealthBar = (
   ctx: CanvasRenderingContext2D,
   enemy: Enemy,
@@ -527,6 +565,12 @@ const drawEnemy = (
   }
   ctx.restore();
   drawHealthBar(ctx, enemy, camera);
+
+  // Boss marker: a small bat silhouette hovers above pumpkins, giant bats,
+  // and the reaper. Bobs gently so the eye finds them in the crowd.
+  if (enemy.type === 'pumpkin' || enemy.type === 'giantbat' || enemy.type === 'reaper') {
+    drawBossMarker(ctx, cx, enemy.y - camera.y - 6, enemy.type === 'reaper' ? '#ef4444' : '#fde68a');
+  }
 
   if (Date.now() - enemy.lastHit < 90) {
     ctx.save();

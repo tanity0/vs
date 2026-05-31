@@ -40,7 +40,7 @@ export const COUNTER_COOLDOWN = 420; // ms between counters (anti-spam)
 // barrage can be turned back in full. No hard cap — the cooldown still
 // kicks in once the chain finally lapses.
 export const COUNTER_EXTEND_PER_HIT = 200;
-export const REFLECT_DAMAGE_MULTIPLIER = 5.0;
+export const REFLECT_DAMAGE_MULTIPLIER = 12.0;
 export const REFLECT_SPEED_MULTIPLIER = 1.8;
 
 // Player base stats tuned to feel like Vampire Survivors' Antonio: slower
@@ -589,6 +589,10 @@ export const useGameStore = create<GameState>((set, get) => ({
           damage: p.damage * multiplier,
           hostile: false,
           reflected: true,
+          // Reflected bolts pierce — they plow through whatever line of
+          // enemies happens to be between the player and the original
+          // firer instead of stopping at the first body.
+          passthrough: true,
           hitEnemies: [],
           createdAt: Date.now()
         };

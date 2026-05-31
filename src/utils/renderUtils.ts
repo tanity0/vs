@@ -762,6 +762,34 @@ const drawPickup = (
       ctx.fillRect(cx + 4, drawY, 4, 5);
       break;
     }
+    case 'chest': {
+      // Treasure chest — pulsing gold rim plus a small box.
+      const pulse = 0.85 + 0.15 * Math.sin(Date.now() / 220);
+      ctx.save();
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 14 * pulse;
+      // Wooden body
+      ctx.fillStyle = '#7c4a1b';
+      ctx.fillRect(cx - 8, drawY - 4, 16, 11);
+      // Gold lid
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.moveTo(cx - 9, drawY - 4);
+      ctx.lineTo(cx + 9, drawY - 4);
+      ctx.lineTo(cx + 8, drawY - 8);
+      ctx.lineTo(cx - 8, drawY - 8);
+      ctx.closePath();
+      ctx.fill();
+      // Latch
+      ctx.fillStyle = '#fde68a';
+      ctx.fillRect(cx - 2, drawY - 5, 4, 4);
+      // Rim highlight
+      ctx.strokeStyle = '#fde68a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cx - 8, drawY - 4, 16, 11);
+      ctx.restore();
+      break;
+    }
     case 'bomb': {
       ctx.fillStyle = '#0f172a';
       ctx.beginPath();

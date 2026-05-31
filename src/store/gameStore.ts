@@ -46,7 +46,7 @@ export const COUNTER_EXTEND_PER_HIT = 200;
 // KNOCKBACK_RADIUS of the player is pushed outward at KNOCKBACK_SPEED
 // (scaled by distance falloff), with the velocity decaying linearly to
 // zero over KNOCKBACK_DURATION. Reapers are immune.
-export const KNOCKBACK_RADIUS = 180;
+export const KNOCKBACK_RADIUS = 110;
 export const KNOCKBACK_SPEED = 600;
 export const KNOCKBACK_DURATION = 280;
 export const REFLECT_DAMAGE_MULTIPLIER = 12.0;
@@ -759,6 +759,19 @@ export const useGameStore = create<GameState>((set, get) => ({
         if (total > 0) get().gainExperience(total);
         set(state => ({
           pickups: state.pickups.filter(p => p.type !== 'experience' || p.id === id)
+        }));
+        break;
+      }
+      case 'chest': {
+        // Boss-drop treasure chest. Behaves like a level-up's upgrade menu
+        // but without bumping the level or resetting XP. Player just gets
+        // a free pick.
+        const upgradeOptions = generateUpgradeOptions(get().player);
+        set(state => ({
+          upgradeOptions,
+          showUpgradeMenu: true,
+          isPaused: true,
+          gameStats: state.gameStats
         }));
         break;
       }

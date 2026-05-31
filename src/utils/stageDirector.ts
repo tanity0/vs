@@ -58,6 +58,13 @@ const lineFromSide = (
 
 const WAVE_EVENTS: WaveEvent[] = [
   {
+    // First boss — single pumpkin so the player gets their first chest
+    // within ~3 minutes regardless of how the spawner is rolling.
+    id: 'pumpkin-solo-3min',
+    triggerAtMs: 3 * 60 * 1000,
+    spawner: (player, _b, t) => ringAroundPlayer('pumpkin', 1, 280, player, t)
+  },
+  {
     id: 'pumpkin-elites-5min',
     triggerAtMs: 5 * 60 * 1000,
     spawner: (player, _b, t) => ringAroundPlayer('pumpkin', 3, 320, player, t)
@@ -93,9 +100,21 @@ const WAVE_EVENTS: WaveEvent[] = [
     spawner: (player, _b, t) => ringAroundPlayer('giantbat', 2, 320, player, t)
   },
   {
+    // Mid/late-game chest opportunity so the player has a fresh upgrade
+    // pick before the 25:00 ghost swarm rolls in.
+    id: 'giantbat-solo-22min',
+    triggerAtMs: 22 * 60 * 1000,
+    spawner: (player, _b, t) => ringAroundPlayer('giantbat', 1, 320, player, t)
+  },
+  {
     id: 'ghost-swarm-25min',
     triggerAtMs: 25 * 60 * 1000,
     spawner: (player, _b, t) => ringAroundPlayer('ghost', 30, 400, player, t)
+  },
+  {
+    id: 'pumpkin-pair-27min',
+    triggerAtMs: 27 * 60 * 1000,
+    spawner: (player, _b, t) => ringAroundPlayer('pumpkin', 2, 320, player, t)
   },
   {
     id: 'reaper',

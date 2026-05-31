@@ -260,6 +260,23 @@ export const useGameLoop = (onGameOver: () => void) => {
                 value: enemy.experienceValue
               });
               const isElite = enemy.type === 'pumpkin' || enemy.type === 'giantbat';
+              if (isElite) {
+                // VS-style boss drop — treasure chest always drops from
+                // pumpkins and giant bats. Pickup it up to open a free
+                // upgrade menu.
+                addPickup({
+                  id: `pickup-chest-${enemy.id}`,
+                  x: enemy.x + enemy.width / 2 - 8,
+                  y: enemy.y + enemy.height / 2 - 8 - 18,
+                  type: 'chest',
+                  value: 0
+                });
+                spawnRing(
+                  enemy.x + enemy.width / 2,
+                  enemy.y + enemy.height / 2,
+                  10, 80, 'rgba(252,211,77,0.7)', 3, 500
+                );
+              }
               const chickenChance = isElite ? 0.35 : 0.015;
               const magnetChance = isElite ? 0.15 : 0.004;
               const bombChance = isElite ? 0.1 : 0.002;
@@ -358,6 +375,15 @@ export const useGameLoop = (onGameOver: () => void) => {
                     player.y + player.height / 2,
                     8, 220, 'rgba(96,165,250,0.55)', 3, 320
                   );
+                  break;
+                case 'chest':
+                  spawnFlash('rgba(252, 211, 77, 0.35)', 280);
+                  spawnRing(
+                    player.x + player.width / 2,
+                    player.y + player.height / 2,
+                    10, 140, 'rgba(252, 211, 77, 0.95)', 5, 460
+                  );
+                  spawnBurst(pk.x + 8, pk.y + 8, '#fde68a', 20);
                   break;
                 case 'bomb':
                   spawnFlash('rgba(255,255,255,0.85)', 200);

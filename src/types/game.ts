@@ -122,7 +122,7 @@ export interface Pickup {
   value: number;
 }
 
-export type PickupType = 'experience' | 'health' | 'magnet' | 'bomb';
+export type PickupType = 'experience' | 'health' | 'magnet' | 'bomb' | 'chest';
 
 // Upgrade options
 export interface UpgradeOption {

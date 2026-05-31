@@ -288,12 +288,20 @@ const drawPlayer = (
 
   // Sprite-first: if a player.png exists, draw it (flipped when facing
   // left). Otherwise fall back to the procedural cape/head/hat figure.
+  // The visual is rendered larger than the hitbox so the sprite's pixels
+  // read as chunky pixel art instead of being downscaled into mush. The
+  // collision box stays at player.width/height.
   const flipH = player.direction === 'left'
     || (player.lastDirection && player.lastDirection.x < 0);
+  const PLAYER_VISUAL_SCALE = 1.7;
+  const visW = player.width * PLAYER_VISUAL_SCALE;
+  const visH = player.height * PLAYER_VISUAL_SCALE;
+  const visX = (player.x + player.width / 2) - visW / 2 - camera.x;
+  const visY = (player.y + player.height / 2) - visH / 2 - camera.y;
   const drewSprite = drawSprite(
     ctx, 'player',
-    player.x - camera.x, player.y - camera.y,
-    player.width, player.height,
+    visX, visY,
+    visW, visH,
     !!flipH
   );
   if (!drewSprite) {

@@ -1,13 +1,14 @@
 import { useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
 
-const isGuardKey = (key: string) => {
+// Keyboard fallback — the game is touch-first now, but we keep WASD/arrow
+// movement and Space-to-counter so the game is still playable on a laptop.
+const isCounterKey = (key: string) => {
   const k = key.toLowerCase();
-  return k === ' ' || k === 'spacebar' || k === 'space' || k === 'shift' || k === 'j';
+  return k === ' ' || k === 'spacebar' || k === 'space' || k === 'j';
 };
 
 export const useGameControls = () => {
-  // Set up keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const { key } = e;
@@ -32,11 +33,11 @@ export const useGameControls = () => {
           break;
       }
 
-      if (isGuardKey(key)) {
-        // Prevent the page from scrolling on Space and avoid auto-repeat noise
+      if (isCounterKey(key)) {
         e.preventDefault();
+        // First press only — auto-repeat shouldn't keep refiring the counter
         if (!e.repeat) {
-          inputState.guard = true;
+          useGameStore.getState().triggerCounter();
         }
       }
 
@@ -66,18 +67,12 @@ export const useGameControls = () => {
           break;
       }
 
-      if (isGuardKey(key)) {
-        inputState.guard = false;
-      }
-
       useGameStore.setState({ inputState });
     };
 
-    // Add event listeners for keyboard
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
-    // Cleanup
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);

@@ -1,10 +1,10 @@
 import { Player, Enemy, Projectile, Pickup, WeaponType, EnemyType } from '../types/game';
 import { getEnemyColor } from './enemyUtils';
-import { JUST_GUARD_WINDOW } from '../store/gameStore';
 
-// Draw the guard shield. The shield ring's color signals whether the player
-// is inside the just-guard window (gold) or holding a normal guard (cyan).
-const drawGuardShield = (
+// Draw the counter ring. It's visible only while the counter window is open
+// (the brief moment after the player lifts their finger). A successful reflect
+// triggers a short gold burst.
+const drawCounterShield = (
   ctx: CanvasRenderingContext2D,
   player: Player,
   camera: { x: number; y: number }
@@ -14,9 +14,9 @@ const drawGuardShield = (
   const baseRadius = player.width * 0.85;
   const now = Date.now();
 
-  // Just-guard success flash — short white burst that overlays the shield
-  if (now - player.lastJustGuardTime < 250) {
-    const t = 1 - (now - player.lastJustGuardTime) / 250;
+  // Success flash — short white-gold burst overlay
+  if (now - player.lastCounterSuccessTime < 280) {
+    const t = 1 - (now - player.lastCounterSuccessTime) / 280;
     ctx.save();
     ctx.globalAlpha = t;
     ctx.fillStyle = '#FDE68A';
@@ -26,29 +26,36 @@ const drawGuardShield = (
     ctx.restore();
   }
 
-  if (!player.isGuarding) return;
+  // Counter window open — gold ring
+  if (now <= player.counterWindowEnd) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(251, 191, 36, 0.22)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+    ctx.fill();
 
-  const elapsed = now - player.guardStartTime;
-  const inJustGuard = elapsed <= JUST_GUARD_WINDOW;
-  const ringColor = inJustGuard ? '#FBBF24' : '#38BDF8';
-  const fillColor = inJustGuard
-    ? 'rgba(251, 191, 36, 0.25)'
-    : 'rgba(56, 189, 248, 0.18)';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#FBBF24';
+    ctx.shadowColor = '#FBBF24';
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
 
-  ctx.save();
-  ctx.fillStyle = fillColor;
-  ctx.beginPath();
-  ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.lineWidth = inJustGuard ? 4 : 2;
-  ctx.strokeStyle = ringColor;
-  ctx.shadowColor = ringColor;
-  ctx.shadowBlur = inJustGuard ? 18 : 8;
-  ctx.beginPath();
-  ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
+  // Cooldown — subtle dimmed ring so the player can read when the counter
+  // is unavailable.
+  if (now < player.counterCooldownEnd) {
+    ctx.save();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 };
 
 interface RenderProps {
@@ -220,7 +227,7 @@ const drawPlayer = (
 
   // Reset alpha so shield visuals are not affected by invulnerability flicker
   ctx.globalAlpha = 1;
-  drawGuardShield(ctx, player, camera);
+  drawCounterShield(ctx, player, camera);
   if (player.invulnerable) {
     ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 50);
   }

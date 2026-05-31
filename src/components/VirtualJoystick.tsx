@@ -19,14 +19,20 @@ const VirtualJoystick: React.FC = () => {
 
   const setSwipeDirection = useGameStore(state => state.setSwipeDirection);
   const setLastDirection = useGameStore(state => state.setLastDirection);
+  const triggerCounter = useGameStore(state => state.triggerCounter);
 
   const release = useCallback(() => {
+    // The core gameplay hook: lifting the finger fires the counter window.
+    // The store enforces the cooldown so spam-tapping doesn't help.
+    if (pointerIdRef.current !== null) {
+      triggerCounter();
+    }
     pointerIdRef.current = null;
     originRef.current = null;
     setOrigin(null);
     setDelta({ x: 0, y: 0 });
     setSwipeDirection(null);
-  }, [setSwipeDirection]);
+  }, [setSwipeDirection, triggerCounter]);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (pointerIdRef.current !== null) return;
@@ -85,12 +91,8 @@ const VirtualJoystick: React.FC = () => {
   return (
     <div
       ref={zoneRef}
-      className="absolute left-0 bottom-0 z-20"
-      style={{
-        width: '50vw',
-        height: '60vh',
-        touchAction: 'none'
-      }}
+      className="absolute inset-0 z-20"
+      style={{ touchAction: 'none' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}

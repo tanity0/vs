@@ -163,10 +163,11 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartGame }) => {
             </button>
 
             <div className="mt-3 text-[12px] text-white/60 space-y-1 text-center">
-              <p>左下のスティックで移動／キーボードはWASD・矢印</p>
-              <p className="text-cyan-300/90">
-                右下の「ガード」で敵弾をブロック。発動直後のジャストガードで反射！
+              <p>画面のどこでも指を置いてスワイプ＝移動。</p>
+              <p className="text-amber-300/90">
+                指を離した瞬間にカウンター発動！敵の弾を反射できます。
               </p>
+              <p className="text-white/40 text-[11px]">PC: WASD / 矢印で移動・Space でカウンター</p>
             </div>
           </div>
         </div>

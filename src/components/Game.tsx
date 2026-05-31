@@ -107,11 +107,13 @@ const Game: React.FC<GameProps> = ({ onGameOver }) => {
       }}
     >
       <GameCanvas width={windowSize.width} height={windowSize.height} />
+
+      {/* Joystick zone covers the whole screen for one-handed play; place
+          it BEFORE the HUD/buttons so those render on top and stay tappable. */}
+      {isTouch && <VirtualJoystick />}
+
       <GameHUD fps={fps} />
       <FullscreenButton target={containerRef} />
-
-      {/* Touch UI: virtual joystick (left) + guard / pause buttons (right) */}
-      {isTouch && <VirtualJoystick />}
       {isTouch && <MobileControls />}
       
       {isPaused && !showUpgradeMenu && (

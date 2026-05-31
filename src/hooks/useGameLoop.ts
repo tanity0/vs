@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { JUST_GUARD_WINDOW, useGameStore } from '../store/gameStore';
+import { useGameStore } from '../store/gameStore';
 import {
   checkProjectileEnemyCollisions,
   checkPlayerEnemyCollisions,
@@ -43,7 +43,6 @@ export const useGameLoop = (onGameOver: () => void) => {
   const damagePlayer = useGameStore(state => state.damagePlayer);
   const removeProjectile = useGameStore(state => state.removeProjectile);
   const reflectProjectile = useGameStore(state => state.reflectProjectile);
-  const setGuard = useGameStore(state => state.setGuard);
   const addProjectile = useGameStore(state => state.addProjectile);
   const collectPickup = useGameStore(state => state.collectPickup);
   const addPickup = useGameStore(state => state.addPickup);
@@ -95,11 +94,6 @@ export const useGameLoop = (onGameOver: () => void) => {
             }
           }));
         }
-
-        // Sync guard state with input (keyboard or mobile button).
-        // Doing this every frame keeps the held-button state authoritative
-        // and lets setGuard enforce the post-release cooldown.
-        setGuard(inputState.guard);
 
         // Move player based on input or swipe direction
         movePlayer(inputState, deltaTime);
@@ -159,25 +153,19 @@ export const useGameLoop = (onGameOver: () => void) => {
           }));
         }
 
-        // Check for collisions between hostile projectiles and the player.
-        // Read fresh projectile state because we may have just added enemy bolts.
+        // Hostile projectiles vs player. If the counter window is currently
+        // open (the player just lifted their finger / tapped Space), reflect
+        // the bolt back at the firing enemy. Otherwise it does damage.
         const liveProjectiles = useGameStore.getState().projectiles;
         const incoming = checkProjectilePlayerCollisions(liveProjectiles, player);
         for (const proj of incoming) {
           const currentPlayer = useGameStore.getState().player;
-          const guardElapsed = now - currentPlayer.guardStartTime;
-
-          if (currentPlayer.isGuarding && guardElapsed <= JUST_GUARD_WINDOW) {
-            // Just-guard: reflect the projectile back boosted
+          if (now <= currentPlayer.counterWindowEnd) {
             reflectProjectile(proj.id);
             useGameStore.setState(state => ({
-              player: { ...state.player, lastJustGuardTime: now }
+              player: { ...state.player, lastCounterSuccessTime: now }
             }));
-          } else if (currentPlayer.isGuarding) {
-            // Regular guard: absorb without damage
-            removeProjectile(proj.id);
           } else {
-            // Unguarded hit
             const playerDied = damagePlayer(proj.damage);
             removeProjectile(proj.id);
             if (playerDied) {
@@ -310,7 +298,6 @@ export const useGameLoop = (onGameOver: () => void) => {
     damagePlayer,
     removeProjectile,
     reflectProjectile,
-    setGuard,
     collectPickup,
     addPickup,
     setGameTime,

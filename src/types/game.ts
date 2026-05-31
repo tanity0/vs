@@ -23,11 +23,11 @@ export interface Player {
   invulnerable: boolean;
   invulnerableTime: number;
   lastDirection: { x: number; y: number } | null;
-  // Guard state
-  isGuarding: boolean;
-  guardStartTime: number;
-  guardReleaseTime: number;
-  lastJustGuardTime: number;
+  // Counter-on-release state. Releasing the touch opens a brief window
+  // during which any incoming hostile projectile is reflected.
+  counterWindowEnd: number;     // ms timestamp; window is open while now <= this
+  counterCooldownEnd: number;   // ms timestamp; cannot open another window until this
+  lastCounterSuccessTime: number; // for the success flash effect
 }
 
 // Movement direction
@@ -123,13 +123,13 @@ export interface GameStats {
   maxLevel: number;
 }
 
-// Input state
+// Input state — keyboard fallback only. Touch is handled directly by the
+// VirtualJoystick component via swipeDirection.
 export interface InputState {
   up: boolean;
   down: boolean;
   left: boolean;
   right: boolean;
-  guard: boolean;
 }
 
 // Game area bounds

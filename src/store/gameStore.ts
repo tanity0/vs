@@ -6,10 +6,11 @@ import {
 } from '../types/game';
 import { getStartingWeapons } from '../utils/weaponUtils';
 
-// Guard mechanic tuning
-export const JUST_GUARD_WINDOW = 180; // ms from guard activation
-export const GUARD_COOLDOWN = 350; // ms after release before guard can be raised again
-export const GUARD_MOVE_MULTIPLIER = 0.45;
+// Counter-on-release tuning. The counter window opens the moment the player
+// lifts their finger (or presses Space on PC) and stays open briefly. Any
+// hostile projectile that hits the player during the window is reflected.
+export const COUNTER_WINDOW = 240; // ms the window stays open after trigger
+export const COUNTER_COOLDOWN = 420; // ms between counters (anti-spam)
 export const REFLECT_DAMAGE_MULTIPLIER = 2.5;
 export const REFLECT_SPEED_MULTIPLIER = 1.4;
 
@@ -39,7 +40,7 @@ interface GameState {
   damagePlayer: (amount: number) => boolean;
   gainExperience: (amount: number) => void;
   levelUp: () => void;
-  setGuard: (active: boolean) => void;
+  triggerCounter: () => void;
   
   // Weapon actions
   fireWeapons: (currentTime: number) => void;
@@ -90,10 +91,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     invulnerable: false,
     invulnerableTime: 0,
     lastDirection: null,
-    isGuarding: false,
-    guardStartTime: 0,
-    guardReleaseTime: 0,
-    lastJustGuardTime: 0
+    counterWindowEnd: 0,
+    counterCooldownEnd: 0,
+    lastCounterSuccessTime: 0
   },
   enemies: [],
   projectiles: [],
@@ -102,7 +102,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   isPaused: false,
   showUpgradeMenu: false,
   upgradeOptions: [],
-  inputState: { up: false, down: false, left: false, right: false, guard: false },
+  inputState: { up: false, down: false, left: false, right: false },
   swipeDirection: null,
   gameBounds: { width: 800, height: 600 },
   gameStats: {
@@ -127,9 +127,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       let direction = 'idle';
       let isMoving = false;
       let lastDirection = player.lastDirection;
-      const moveSpeed = player.isGuarding
-        ? player.speed * GUARD_MOVE_MULTIPLIER
-        : player.speed;
+      const moveSpeed = player.speed;
 
       // Handle movement based on input state (keyboard) or swipe direction (touch)
       if (swipeDirection) {
@@ -223,39 +221,17 @@ export const useGameStore = create<GameState>((set, get) => ({
     }));
   },
   
-  setGuard: (active) => {
+  triggerCounter: () => {
     set(state => {
       const { player } = state;
       const now = Date.now();
-
-      if (active) {
-        // Already guarding — no state change
-        if (player.isGuarding) return {};
-
-        // Respect guard cooldown after a release
-        if (
-          player.guardReleaseTime > 0 &&
-          now - player.guardReleaseTime < GUARD_COOLDOWN
-        ) {
-          return {};
-        }
-
-        return {
-          player: {
-            ...player,
-            isGuarding: true,
-            guardStartTime: now
-          }
-        };
-      }
-
-      // Releasing the guard
-      if (!player.isGuarding) return {};
+      // Respect cooldown
+      if (now < player.counterCooldownEnd) return {};
       return {
         player: {
           ...player,
-          isGuarding: false,
-          guardReleaseTime: now
+          counterWindowEnd: now + COUNTER_WINDOW,
+          counterCooldownEnd: now + COUNTER_WINDOW + COUNTER_COOLDOWN
         }
       };
     });
@@ -691,10 +667,9 @@ export const useGameStore = create<GameState>((set, get) => ({
           invulnerable: false,
           invulnerableTime: 0,
           lastDirection: null,
-          isGuarding: false,
-          guardStartTime: 0,
-          guardReleaseTime: 0,
-          lastJustGuardTime: 0
+          counterWindowEnd: 0,
+          counterCooldownEnd: 0,
+          lastCounterSuccessTime: 0
         },
         enemies: [],
         projectiles: [],

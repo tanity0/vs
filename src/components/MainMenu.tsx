@@ -71,7 +71,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartGame }) => {
             ダークサバイバーズ
           </h1>
           <p className="text-[13px] text-white/60 mt-1">
-            終わりなき闇の大群から生き残れ
+            マッド・フォレストで30分生き延びろ
           </p>
           <span className="absolute top-3 right-3 glass-pill px-2 py-0.5 text-[10px] font-mono tabular-nums text-white/70">
             v{__APP_VERSION__}

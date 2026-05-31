@@ -50,7 +50,16 @@ export interface Enemy {
   lastShot: number;
 }
 
-export type EnemyType = 'basic' | 'fast' | 'tank' | 'ranged' | 'boss';
+export type EnemyType =
+  | 'bat'        // ubiquitous low-HP swarmer
+  | 'skeleton'   // standard melee chaser
+  | 'zombie'     // slow tank
+  | 'plant'     // near-stationary ranged seed-spitter
+  | 'ghost'     // fast translucent melee
+  | 'werewolf'  // mid-game fast bruiser
+  | 'pumpkin'   // elite (wave events)
+  | 'giantbat'  // mini-boss every ~10 minutes
+  | 'reaper';   // terminal entity at 30:00
 
 // Weapon types
 export interface Weapon {
@@ -99,7 +108,7 @@ export interface Pickup {
   value: number;
 }
 
-export type PickupType = 'experience' | 'health' | 'magnet';
+export type PickupType = 'experience' | 'health' | 'magnet' | 'bomb';
 
 // Upgrade options
 export interface UpgradeOption {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useGameStore } from '../store/gameStore';
+import { useGameStore, INVULN_MS } from '../store/gameStore';
 import {
   checkProjectileEnemyCollisions,
   checkPlayerEnemyCollisions,
@@ -13,6 +13,7 @@ import {
   getEnemySpawnCount,
   getEnemySpawnInterval
 } from '../utils/enemyUtils';
+import { consumeDueWaves, newConsumedWaves } from '../utils/stageDirector';
 import { fireWeapon } from '../utils/weaponUtils';
 
 export const useGameLoop = (onGameOver: () => void) => {
@@ -21,6 +22,10 @@ export const useGameLoop = (onGameOver: () => void) => {
   const lastFrameTimeRef = useRef(0);
   const lastEnemySpawnRef = useRef(0);
   const fpsCounterRef = useRef({ frames: 0, lastCheck: 0 });
+  // Scripted-wave consumption set; survives across frames within one run
+  // and is reset whenever gameTime rolls back to ~0 (i.e. a fresh game).
+  const consumedWavesRef = useRef(newConsumedWaves());
+  const lastSeenGameTimeRef = useRef(0);
   
   // Game state
   const isPaused = useGameStore(state => state.isPaused);
@@ -82,11 +87,19 @@ export const useGameLoop = (onGameOver: () => void) => {
       // Skip updates if game is paused
       if (!isPaused) {
         // Update game time
-        setGameTime(gameTime + deltaTime * 1000);
+        const newGameTime = gameTime + deltaTime * 1000;
+        setGameTime(newGameTime);
         updateGameStats({ timeAlive: gameTime / 1000 });
 
+        // Detect a fresh run (gameTime rewound to ~0) and reset scripted
+        // wave consumption so the same player can re-fight the schedule.
+        if (newGameTime < lastSeenGameTimeRef.current) {
+          consumedWavesRef.current = newConsumedWaves();
+        }
+        lastSeenGameTimeRef.current = newGameTime;
+
         // Update player invulnerability
-        if (player.invulnerable && Date.now() - player.invulnerableTime > 1000) {
+        if (player.invulnerable && Date.now() - player.invulnerableTime > INVULN_MS) {
           useGameStore.setState(state => ({
             player: {
               ...state.player,
@@ -97,19 +110,11 @@ export const useGameLoop = (onGameOver: () => void) => {
 
         // Move player based on input or swipe direction
         movePlayer(inputState, deltaTime);
-        
-        // Update camera position to follow player with smoother movement and bounds
-        const targetCameraX = Math.max(0, player.x - gameBounds.width / 2 + player.width / 2);
-        const targetCameraY = Math.max(0, player.y - gameBounds.height / 2 + player.height / 2);
-        
-        // Limit camera to game area (with buffer)
-        const maxCameraX = Math.max(0, gameBounds.width * 0.5);
-        const maxCameraY = Math.max(0, gameBounds.height * 0.5);
-        
-        const boundedCameraX = Math.min(maxCameraX, targetCameraX);
-        const boundedCameraY = Math.min(maxCameraY, targetCameraY);
-        
-        setCameraPosition(boundedCameraX, boundedCameraY);
+
+        // Infinite-world camera: center the player exactly.
+        const targetCameraX = player.x - gameBounds.width / 2 + player.width / 2;
+        const targetCameraY = player.y - gameBounds.height / 2 + player.height / 2;
+        setCameraPosition(targetCameraX, targetCameraY);
         
         // Fire weapons
         player.weapons.forEach(weapon => {
@@ -188,27 +193,48 @@ export const useGameLoop = (onGameOver: () => void) => {
             removeProjectile(projectileId);
           }
           
-          // If enemy was killed, spawn experience pickup
+          // If enemy was killed, spawn pickups. VS-style drop table:
+          //   - always an XP gem; its `value` becomes the gem tier.
+          //   - rare chicken (HP), magnet, bomb. Elites/giantbats roll richer.
           if (enemyKilled) {
             const enemy = enemies.find(e => e.id === enemyId);
-            
             if (enemy) {
               addPickup({
-                id: `pickup-${Date.now()}-${Math.random()}`,
+                id: `pickup-xp-${enemy.id}`,
                 x: enemy.x + enemy.width / 2 - 8,
                 y: enemy.y + enemy.height / 2 - 8,
                 type: 'experience',
                 value: enemy.experienceValue
               });
-              
-              // Occasionally spawn health pickup
-              if (Math.random() < 0.05) {
+              const isElite = enemy.type === 'pumpkin' || enemy.type === 'giantbat';
+              const chickenChance = isElite ? 0.35 : 0.015;
+              const magnetChance = isElite ? 0.15 : 0.004;
+              const bombChance = isElite ? 0.1 : 0.002;
+              if (Math.random() < chickenChance) {
                 addPickup({
-                  id: `pickup-health-${Date.now()}-${Math.random()}`,
+                  id: `pickup-chicken-${enemy.id}`,
                   x: enemy.x + enemy.width / 2 - 8,
-                  y: enemy.y + enemy.height / 2 - 8 + 20,
+                  y: enemy.y + enemy.height / 2 - 8 + 18,
                   type: 'health',
-                  value: 10
+                  value: 30
+                });
+              }
+              if (Math.random() < magnetChance) {
+                addPickup({
+                  id: `pickup-magnet-${enemy.id}`,
+                  x: enemy.x + enemy.width / 2 - 8 + 14,
+                  y: enemy.y + enemy.height / 2 - 8,
+                  type: 'magnet',
+                  value: 0
+                });
+              }
+              if (Math.random() < bombChance) {
+                addPickup({
+                  id: `pickup-bomb-${enemy.id}`,
+                  x: enemy.x + enemy.width / 2 - 8 - 14,
+                  y: enemy.y + enemy.height / 2 - 8,
+                  type: 'bomb',
+                  value: 0
                 });
               }
             }
@@ -236,32 +262,48 @@ export const useGameLoop = (onGameOver: () => void) => {
           });
         }
         
-        // Spawn enemies
+        // Continuous spawner — drip enemies onto the field from off-screen.
         if (
           timestamp - lastEnemySpawnRef.current > getEnemySpawnInterval(gameTime)
         ) {
           const spawnCount = getEnemySpawnCount(gameTime);
-          
+
           for (let i = 0; i < spawnCount; i++) {
             const enemy = generateEnemy(gameTime, player, gameBounds);
             addEnemy(enemy);
           }
-          
+
           lastEnemySpawnRef.current = timestamp;
         }
-        
-        // Limit enemy count to prevent lag
-        const maxEnemies = Math.min(50, 20 + Math.floor(gameTime / 30000));
+
+        // Scripted wave/elite events (5min pumpkin, 7min bat horde, 30min
+        // Reaper, etc.). consumeDueWaves fires each event exactly once.
+        const waveEnemies = consumeDueWaves(
+          gameTime,
+          consumedWavesRef.current,
+          player,
+          gameBounds
+        );
+        waveEnemies.forEach(addEnemy);
+
+        // Limit enemy count to keep the simulation tractable on phones.
+        // Reapers and giant bats are always kept regardless of distance.
+        const maxEnemies = Math.min(120, 40 + Math.floor(gameTime / 30000));
         if (enemies.length > maxEnemies) {
-          // Find the enemies furthest from the player and remove them
-          const sortedEnemies = [...enemies].sort((a, b) => {
-            const distA = Math.hypot(a.x - player.x, a.y - player.y);
-            const distB = Math.hypot(b.x - player.x, b.y - player.y);
-            return distB - distA; // Sort descending (furthest first)
-          });
-          
-          const enemiesToRemove = sortedEnemies.slice(0, enemies.length - maxEnemies);
-          enemiesToRemove.forEach(enemy => {
+          // Find the enemies furthest from the player and remove them,
+          // but never cull elites/giantbats/reaper — they're set-pieces.
+          const isProtected = (t: string) =>
+            t === 'reaper' || t === 'giantbat' || t === 'pumpkin';
+          const sortedEnemies = [...enemies]
+            .filter(e => !isProtected(e.type))
+            .sort((a, b) => {
+              const distA = Math.hypot(a.x - player.x, a.y - player.y);
+              const distB = Math.hypot(b.x - player.x, b.y - player.y);
+              return distB - distA;
+            });
+
+          const toRemove = sortedEnemies.slice(0, enemies.length - maxEnemies);
+          toRemove.forEach(enemy => {
             useGameStore.getState().removeEnemy(enemy.id);
           });
         }

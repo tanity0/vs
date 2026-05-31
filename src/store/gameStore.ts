@@ -2,9 +2,34 @@ import { create } from 'zustand';
 import { generateUpgradeOptions } from '../utils/upgradeUtils';
 import {
   Player, Enemy, Projectile, Pickup, GameStats,
-  InputState, UpgradeOption, GameBounds, CharacterClass
+  InputState, UpgradeOption, GameBounds, CharacterClass,
+  Weapon, WeaponType
 } from '../types/game';
-import { getStartingWeapons } from '../utils/weaponUtils';
+import { getStartingWeapons, getWeaponDisplayName } from '../utils/weaponUtils';
+
+// Stat templates for new weapons gained via level-up. Mirrors the starting
+// weapon stats so a wand acquired mid-run isn't crippled compared to a
+// wand started with.
+const newWeaponTemplate = (type: WeaponType): Weapon => {
+  const id = `weapon-${type}-${Date.now()}`;
+  const name = getWeaponDisplayName(type);
+  switch (type) {
+    case 'whip':
+      return { id, name, type, damage: 10, cooldown: 1200, lastFired: 0, level: 1, area: 120, duration: 220 };
+    case 'wand':
+      return { id, name, type, damage: 8, cooldown: 1100, lastFired: 0, level: 1, projectileSpeed: 360, projectileSize: 14, passthrough: false };
+    case 'knife':
+      return { id, name, type, damage: 7, cooldown: 700, lastFired: 0, level: 1, projectileSpeed: 420, projectileSize: 12, passthrough: false, count: 1 };
+    case 'axe':
+      return { id, name, type, damage: 14, cooldown: 1500, lastFired: 0, level: 1, projectileSpeed: 280, projectileSize: 22 };
+    case 'bible':
+      return { id, name, type, damage: 9, cooldown: 1800, lastFired: 0, level: 1, projectileSize: 18 };
+    case 'garlic':
+      return { id, name, type, damage: 4, cooldown: 800, lastFired: 0, level: 1, area: 110 };
+    default:
+      return { id, name, type, damage: 8, cooldown: 700, lastFired: 0, level: 1, projectileSpeed: 320, projectileSize: 14 };
+  }
+};
 
 // Counter-on-release tuning. The counter window opens the moment the player
 // lifts their finger (or presses Space on PC) and stays open briefly. Any
@@ -13,6 +38,21 @@ export const COUNTER_WINDOW = 240; // ms the window stays open after trigger
 export const COUNTER_COOLDOWN = 420; // ms between counters (anti-spam)
 export const REFLECT_DAMAGE_MULTIPLIER = 2.5;
 export const REFLECT_SPEED_MULTIPLIER = 1.4;
+
+// Player base stats tuned to feel like Vampire Survivors' Antonio: slower
+// than the previous build (so weapons matter more), modest HP, small body.
+export const PLAYER_BASE_SPEED = 130;
+export const PLAYER_BASE_HP = 120;
+export const PLAYER_HITBOX = 28;
+export const INVULN_MS = 700;
+
+// World is effectively infinite. We still need a finite number for spawn
+// math elsewhere, but we use a very large clamp to remove the wall feel.
+export const WORLD_HALF_EXTENT = 200000;
+
+// Magnet pickup pulls every XP gem to the player. Bomb clears every enemy
+// currently on screen.
+export const MAGNET_DURATION_MS = 1; // we just sweep the field once, no timer needed
 
 interface GameState {
   player: Player;
@@ -76,14 +116,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   player: {
     x: 0,
     y: 0,
-    width: 32,
-    height: 32,
-    speed: 200,
-    health: 100,
-    maxHealth: 100,
+    width: PLAYER_HITBOX,
+    height: PLAYER_HITBOX,
+    speed: PLAYER_BASE_SPEED,
+    health: PLAYER_BASE_HP,
+    maxHealth: PLAYER_BASE_HP,
     experience: 0,
     level: 1,
-    experienceToNextLevel: 10,
+    experienceToNextLevel: 5,
     weapons: [],
     characterClass: 'warrior',
     direction: 'idle',
@@ -191,9 +231,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         }
       }
       
-      // Ensure player stays within bounds
-      newX = Math.max(0, Math.min(gameBounds.width * 1.5 - player.width, newX));
-      newY = Math.max(0, Math.min(gameBounds.height * 1.5 - player.height, newY));
+      // World is effectively infinite — no clamp. Mad Forest is open.
+      void gameBounds;
       
       return {
         player: {
@@ -248,7 +287,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         player: {
           ...state.player,
           health: newHealth,
-          invulnerable: true,
+          invulnerable: amount > 0,
           invulnerableTime: Date.now()
         }
       };
@@ -263,10 +302,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       const { player, gameStats } = state;
       const newExperience = player.experience + amount;
       const newExpCollected = gameStats.experienceCollected + amount;
-      
-      // Log for debugging
-      console.log(`Gained ${amount} experience, total: ${newExperience}`);
-      
       return {
         player: {
           ...player,
@@ -290,7 +325,11 @@ export const useGameStore = create<GameState>((set, get) => ({
     set(state => {
       const { player } = state;
       const newLevel = player.level + 1;
-      const newExpToNextLevel = Math.floor(player.experienceToNextLevel * 1.4);
+      // VS-style ramp: cheap levels early so the upgrade menu shows up often,
+      // then progressively steeper. +2 per level for levels 1-9, then a
+      // smaller multiplier afterward.
+      const stepLinear = newLevel < 10 ? 2 : 0;
+      const newExpToNextLevel = Math.floor(player.experienceToNextLevel * (newLevel < 10 ? 1.1 : 1.18) + stepLinear);
       
       // Generate upgrade options when leveling up
       const upgradeOptions = generateUpgradeOptions(player);
@@ -318,8 +357,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   
   // Weapon actions
   fireWeapons: (currentTime) => {
-    const { player, enemies } = get();
-    
+    const { player } = get();
     player.weapons.forEach(weapon => {
       if (currentTime - weapon.lastFired >= weapon.cooldown) {
         // Logic to create projectiles based on weapon type will go here
@@ -360,24 +398,15 @@ export const useGameStore = create<GameState>((set, get) => ({
             isPaused: false
           };
         } else {
-          // Add new weapon
-          const newWeapon = {
-            id: `weapon-${Date.now()}`,
-            name: upgrade.name,
-            type: upgrade.weaponType,
-            damage: 10,
-            cooldown: 1000,
-            lastFired: 0,
-            level: 1,
-            projectileSpeed: 300,
-            projectileSize: 16,
-            passthrough: false
-          };
-          
+          // Add new weapon. Use per-type templates so each weapon enters
+          // play with sensible stats and behavior (whip = AoE slab,
+          // wand = auto-target, axe = arc, etc.) rather than a knife-shaped
+          // generic.
+          const template = newWeaponTemplate(upgrade.weaponType);
           return {
             player: {
               ...player,
-              weapons: [...player.weapons, newWeapon]
+              weapons: [...player.weapons, template]
             },
             showUpgradeMenu: false,
             isPaused: false
@@ -385,23 +414,46 @@ export const useGameStore = create<GameState>((set, get) => ({
         }
       }
       
-      // Handle passive upgrades
+      // Handle passive upgrades. Player-stat passives mutate the player;
+      // weapon-stat passives mutate every weapon's relevant field.
       if (upgrade.type === 'passive' && upgrade.passiveType) {
-        let updatedPlayer = { ...player };
-        
+        const updatedPlayer = { ...player };
         switch (upgrade.passiveType) {
           case 'maxHealth':
             updatedPlayer.maxHealth += 20;
             updatedPlayer.health = Math.min(updatedPlayer.health + 20, updatedPlayer.maxHealth);
             break;
           case 'speed':
-            updatedPlayer.speed += 20;
+            updatedPlayer.speed = Math.round(updatedPlayer.speed * 1.1);
             break;
-          default:
-            // Other passive upgrades will be handled in weaponUtils.ts
+          case 'might':
+            updatedPlayer.weapons = updatedPlayer.weapons.map(w => ({
+              ...w, damage: w.damage * 1.1
+            }));
+            break;
+          case 'area':
+            updatedPlayer.weapons = updatedPlayer.weapons.map(w => ({
+              ...w,
+              area: w.area ? w.area * 1.1 : w.area,
+              projectileSize: w.projectileSize ? w.projectileSize * 1.05 : w.projectileSize
+            }));
+            break;
+          case 'cooldown':
+            updatedPlayer.weapons = updatedPlayer.weapons.map(w => ({
+              ...w, cooldown: Math.max(80, w.cooldown * 0.92)
+            }));
+            break;
+          case 'duration':
+            updatedPlayer.weapons = updatedPlayer.weapons.map(w => ({
+              ...w, duration: w.duration ? w.duration * 1.15 : w.duration
+            }));
+            break;
+          case 'amount':
+            updatedPlayer.weapons = updatedPlayer.weapons.map(w => ({
+              ...w, count: (w.count || 1) + 1
+            }));
             break;
         }
-        
         return {
           player: updatedPlayer,
           showUpgradeMenu: false,
@@ -474,33 +526,27 @@ export const useGameStore = create<GameState>((set, get) => ({
   
   updateEnemies: (deltaTime) => {
     set(state => {
-      const { enemies, player, gameBounds } = state;
-      
+      const { enemies, player } = state;
+
       const updatedEnemies = enemies.map(enemy => {
-        // Calculate direction to player
+        // Plants are nearly stationary — they shuffle slightly toward the
+        // player but mostly hold ground and spit seeds. Everything else
+        // does the standard VS straight-line chase.
         const dx = player.x - enemy.x;
         const dy = player.y - enemy.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        // Normalize direction
+        const distance = Math.max(0.001, Math.sqrt(dx * dx + dy * dy));
         const dirX = dx / distance;
         const dirY = dy / distance;
-        
-        // Move enemy towards player
-        let newX = enemy.x + dirX * enemy.speed * deltaTime;
-        let newY = enemy.y + dirY * enemy.speed * deltaTime;
-        
-        // Keep enemies within game bounds
-        newX = Math.max(0, Math.min(gameBounds.width * 1.5 - enemy.width, newX));
-        newY = Math.max(0, Math.min(gameBounds.height * 1.5 - enemy.height, newY));
-        
+
+        const speed = enemy.type === 'plant' ? enemy.speed * 0.25 : enemy.speed;
+
         return {
           ...enemy,
-          x: newX,
-          y: newY
+          x: enemy.x + dirX * speed * deltaTime,
+          y: enemy.y + dirY * speed * deltaTime
         };
       });
-      
+
       return { enemies: updatedEnemies };
     });
   },
@@ -540,26 +586,20 @@ export const useGameStore = create<GameState>((set, get) => ({
     const currentTime = Date.now();
     
     set(state => {
-      const { projectiles, gameBounds } = state;
-      
+      const { projectiles, player, gameBounds } = state;
+
+      const cullRadius = Math.max(gameBounds.width, gameBounds.height);
       const updatedProjectiles = projectiles
         .filter(p => {
           // Remove expired projectiles
           if (currentTime - p.createdAt > p.duration) {
             return false;
           }
-          
-          // Remove projectiles out of bounds (with a larger buffer)
-          const buffer = 100;
-          if (
-            p.x < -p.width - buffer || 
-            p.x > gameBounds.width * 1.5 + buffer || 
-            p.y < -p.height - buffer || 
-            p.y > gameBounds.height * 1.5 + buffer
-          ) {
-            return false;
-          }
-          
+          // Cull projectiles that drift far from the camera (world is
+          // effectively infinite so we can't use absolute bounds).
+          const dx = p.x - player.x;
+          const dy = p.y - player.y;
+          if (Math.hypot(dx, dy) > cullRadius) return false;
           return true;
         })
         .map(p => {
@@ -594,9 +634,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   collectPickup: (id) => {
     const { pickups } = get();
     const pickup = pickups.find(p => p.id === id);
-    
+
     if (!pickup) return;
-    
+
     switch (pickup.type) {
       case 'experience':
         get().gainExperience(pickup.value);
@@ -609,11 +649,43 @@ export const useGameStore = create<GameState>((set, get) => ({
           }
         }));
         break;
-      case 'magnet':
-        // Implement magnet logic later
+      case 'magnet': {
+        // VS magnet: collect every XP gem currently on the field. We sum
+        // their value in one go and remove them.
+        const gems = get().pickups.filter(p => p.type === 'experience');
+        const total = gems.reduce((s, g) => s + g.value, 0);
+        if (total > 0) get().gainExperience(total);
+        set(state => ({
+          pickups: state.pickups.filter(p => p.type !== 'experience' || p.id === id)
+        }));
         break;
+      }
+      case 'bomb': {
+        // VS rosary: kill every enemy currently on screen by zeroing their
+        // HP. We don't grant experience for this — it's a panic button.
+        const reachable = get().enemies.filter(e => e.type !== 'reaper');
+        set(state => ({
+          enemies: state.enemies.filter(e => e.type === 'reaper'),
+          gameStats: {
+            ...state.gameStats,
+            enemiesKilled: state.gameStats.enemiesKilled + reachable.length
+          }
+        }));
+        // Drop XP gems where each killed enemy was so the cleanup feels
+        // rewarding even though we skipped the damage path.
+        reachable.forEach(enemy => {
+          get().addPickup({
+            id: `pickup-bomb-${enemy.id}`,
+            x: enemy.x + enemy.width / 2 - 8,
+            y: enemy.y + enemy.height / 2 - 8,
+            type: 'experience',
+            value: enemy.experienceValue
+          });
+        });
+        break;
+      }
     }
-    
+
     get().removePickup(id);
   },
   
@@ -644,22 +716,21 @@ export const useGameStore = create<GameState>((set, get) => ({
     const startingWeapons = getStartingWeapons(validClass);
     
     set(state => {
-      // Set player to center of game bounds
-      const centerX = state.gameBounds.width / 2 - 16; // 16 is half the player width
-      const centerY = state.gameBounds.height / 2 - 16; // 16 is half the player height
-      
+      void state;
+      // World is infinite; player starts at the origin and the camera
+      // follows. No need to pre-center within bounds.
       return {
         player: {
-          x: centerX,
-          y: centerY,
-          width: 32,
-          height: 32,
-          speed: 200,
-          health: 100,
-          maxHealth: 100,
+          x: 0,
+          y: 0,
+          width: PLAYER_HITBOX,
+          height: PLAYER_HITBOX,
+          speed: PLAYER_BASE_SPEED,
+          health: PLAYER_BASE_HP,
+          maxHealth: PLAYER_BASE_HP,
           experience: 0,
           level: 1,
-          experienceToNextLevel: 10,
+          experienceToNextLevel: 5,
           weapons: startingWeapons,
           characterClass: validClass,
           direction: 'idle',
@@ -696,19 +767,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
   
   setCameraPosition: (x, y) => {
-    set(state => {
-      const { gameBounds } = state;
-      
-      // Limit camera to stay within bounds with a small buffer
-      const maxX = Math.max(0, gameBounds.width * 0.5);
-      const maxY = Math.max(0, gameBounds.height * 0.5);
-      
-      const clampedX = Math.max(0, Math.min(maxX, x));
-      const clampedY = Math.max(0, Math.min(maxY, y));
-      
-      return {
-        camera: { x: clampedX, y: clampedY }
-      };
-    });
+    // Infinite world: the camera follows the player one-to-one with no clamp.
+    set({ camera: { x, y } });
   }
 }));

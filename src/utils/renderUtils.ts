@@ -1,9 +1,8 @@
-import { Player, Enemy, Projectile, Pickup, WeaponType, EnemyType } from '../types/game';
+import { Player, Enemy, Projectile, Pickup } from '../types/game';
 import { getEnemyColor } from './enemyUtils';
 
-// Draw the counter ring. It's visible only while the counter window is open
-// (the brief moment after the player lifts their finger). A successful reflect
-// triggers a short gold burst.
+// Counter ring visualization. Visible only while the counter window is open
+// after a finger release; a successful reflect adds a brief gold flash.
 const drawCounterShield = (
   ctx: CanvasRenderingContext2D,
   player: Player,
@@ -11,10 +10,9 @@ const drawCounterShield = (
 ) => {
   const cx = player.x + player.width / 2 - camera.x;
   const cy = player.y + player.height / 2 - camera.y;
-  const baseRadius = player.width * 0.85;
+  const baseRadius = player.width * 0.95;
   const now = Date.now();
 
-  // Success flash — short white-gold burst overlay
   if (now - player.lastCounterSuccessTime < 280) {
     const t = 1 - (now - player.lastCounterSuccessTime) / 280;
     ctx.save();
@@ -26,14 +24,12 @@ const drawCounterShield = (
     ctx.restore();
   }
 
-  // Counter window open — gold ring
   if (now <= player.counterWindowEnd) {
     ctx.save();
     ctx.fillStyle = 'rgba(251, 191, 36, 0.22)';
     ctx.beginPath();
     ctx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
     ctx.fill();
-
     ctx.lineWidth = 4;
     ctx.strokeStyle = '#FBBF24';
     ctx.shadowColor = '#FBBF24';
@@ -45,8 +41,6 @@ const drawCounterShield = (
     return;
   }
 
-  // Cooldown — subtle dimmed ring so the player can read when the counter
-  // is unavailable.
   if (now < player.counterCooldownEnd) {
     ctx.save();
     ctx.lineWidth = 1.5;
@@ -65,391 +59,384 @@ interface RenderProps {
   pickups: Pickup[];
   width: number;
   height: number;
-  camera: {
-    x: number;
-    y: number;
-  };
+  camera: { x: number; y: number };
 }
 
-// Main render function
 export const renderGame = (
   ctx: CanvasRenderingContext2D,
   { player, enemies, projectiles, pickups, width, height, camera }: RenderProps
 ) => {
-  // Clear canvas
   ctx.clearRect(0, 0, width, height);
-  
-  // Draw background
-  drawBackground(ctx, width, height, camera);
-
-  // Draw pickups
+  drawForestBackground(ctx, width, height, camera);
   pickups.forEach(pickup => drawPickup(ctx, pickup, camera));
-  
-  // Draw enemies
   enemies.forEach(enemy => drawEnemy(ctx, enemy, camera));
-  
-  // Draw projectiles
   projectiles.forEach(projectile => drawProjectile(ctx, projectile, camera));
-  
-  // Draw player
   drawPlayer(ctx, player, camera);
 };
 
-// Draw background
-const drawBackground = (
+// Mad Forest backdrop. We paint a green ground, then a grid of darker
+// patches and a sparse field of "tree" circles whose positions are derived
+// from world coordinates so they stay anchored as the camera moves.
+const drawForestBackground = (
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  camera: {
-    x: number;
-    y: number;
-  }
+  camera: { x: number; y: number }
 ) => {
-  // Draw grid
-  ctx.strokeStyle = 'rgba(50, 50, 60, 0.2)';
-  ctx.lineWidth = 1;
-  
-  const gridSize = 50;
-  
-  // Calculate grid offset based on camera position
-  const offsetX = camera.x % gridSize;
-  const offsetY = camera.y % gridSize;
-  
-  // Vertical lines
-  for (let x = -offsetX; x < width; x += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
+  // Solid grass base.
+  ctx.fillStyle = '#1b3a18';
+  ctx.fillRect(0, 0, width, height);
+
+  // Darker grass clumps — every 64px world cell gets a chance, hashed from
+  // its world coords so the pattern is deterministic per location.
+  const cell = 64;
+  const startX = Math.floor(camera.x / cell) * cell;
+  const startY = Math.floor(camera.y / cell) * cell;
+  const endX = startX + width + cell;
+  const endY = startY + height + cell;
+  for (let wx = startX; wx <= endX; wx += cell) {
+    for (let wy = startY; wy <= endY; wy += cell) {
+      const h = hash2(wx, wy);
+      if (h < 0.18) {
+        ctx.fillStyle = '#172e15';
+        ctx.fillRect(wx - camera.x, wy - camera.y, cell, cell);
+      } else if (h < 0.28) {
+        ctx.fillStyle = '#214a1f';
+        ctx.fillRect(wx - camera.x, wy - camera.y, cell, cell);
+      }
+    }
   }
-  
-  // Horizontal lines
-  for (let y = -offsetY; y < height; y += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
+
+  // Trees: a much coarser grid (200px), with occasional triplets per cell.
+  const tcell = 200;
+  const tStartX = Math.floor((camera.x - tcell) / tcell) * tcell;
+  const tStartY = Math.floor((camera.y - tcell) / tcell) * tcell;
+  const tEndX = tStartX + width + tcell * 2;
+  const tEndY = tStartY + height + tcell * 2;
+  for (let wx = tStartX; wx <= tEndX; wx += tcell) {
+    for (let wy = tStartY; wy <= tEndY; wy += tcell) {
+      const h = hash2(wx + 13, wy - 7);
+      if (h < 0.35) {
+        const ox = (hash2(wx, wy + 1) - 0.5) * tcell;
+        const oy = (hash2(wx + 1, wy) - 0.5) * tcell;
+        drawTree(ctx, wx + tcell / 2 + ox - camera.x, wy + tcell / 2 + oy - camera.y);
+      }
+    }
   }
+
+  // Subtle vignette
+  const vg = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.max(width, height) * 0.7);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.45)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, width, height);
 };
 
-// Draw swipe guide on first few seconds of mobile game
-const drawSwipeGuide = (
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number
-) => {
-  // Only show guide for first 5 seconds
-  if (Date.now() % 10000 < 5000) {
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const radius = Math.min(width, height) * 0.15;
-    
-    // Draw semi-transparent circle
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // Draw arrows indicating swipe directions
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.lineWidth = 3;
-    
-    // Draw animated arrows based on time
-    const time = Date.now() / 500;
-    const directions = [
-      { x: Math.cos(time), y: Math.sin(time) },
-      { x: Math.cos(time + Math.PI), y: Math.sin(time + Math.PI) }
-    ];
-    
-    directions.forEach(dir => {
-      const startX = centerX;
-      const startY = centerY;
-      const endX = centerX + dir.x * radius * 0.8;
-      const endY = centerY + dir.y * radius * 0.8;
-      
-      // Draw line
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(endX, endY);
-      ctx.stroke();
-      
-      // Draw arrowhead
-      const arrowSize = 8;
-      const angle = Math.atan2(dir.y, dir.x);
-      
-      ctx.beginPath();
-      ctx.moveTo(endX, endY);
-      ctx.lineTo(
-        endX - arrowSize * Math.cos(angle - Math.PI / 6),
-        endY - arrowSize * Math.sin(angle - Math.PI / 6)
-      );
-      ctx.moveTo(endX, endY);
-      ctx.lineTo(
-        endX - arrowSize * Math.cos(angle + Math.PI / 6),
-        endY - arrowSize * Math.sin(angle + Math.PI / 6)
-      );
-      ctx.stroke();
-    });
-    
-    // Add text guide
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.font = '12px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('スワイプして移動', centerX, centerY + radius + 20);
-  }
+// Deterministic 2D hash → [0,1)
+const hash2 = (x: number, y: number) => {
+  const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return v - Math.floor(v);
 };
 
-// Draw player
+const drawTree = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  // Trunk
+  ctx.fillStyle = '#3b2410';
+  ctx.fillRect(x - 4, y, 8, 16);
+  // Canopy
+  ctx.fillStyle = '#0c2a0c';
+  ctx.beginPath();
+  ctx.arc(x, y - 6, 22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#143d14';
+  ctx.beginPath();
+  ctx.arc(x - 8, y - 10, 12, 0, Math.PI * 2);
+  ctx.arc(x + 9, y - 8, 14, 0, Math.PI * 2);
+  ctx.fill();
+};
+
 const drawPlayer = (
   ctx: CanvasRenderingContext2D,
   player: Player,
-  camera: {
-    x: number;
-    y: number;
-  }
+  camera: { x: number; y: number }
 ) => {
-  // If player is invulnerable, draw with transparency
+  const cx = player.x + player.width / 2 - camera.x;
+  const cy = player.y + player.height / 2 - camera.y;
+
   if (player.invulnerable) {
     ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 50);
   }
 
-  // Draw player body
-  ctx.fillStyle = '#8B5CF6'; // Primary purple
+  // Cape / body
+  ctx.fillStyle = '#3a2a55';
   ctx.beginPath();
-  ctx.arc(
-    player.x + player.width / 2 - camera.x,
-    player.y + player.height / 2 - camera.y,
-    player.width / 2,
-    0,
-    Math.PI * 2
-  );
+  ctx.arc(cx, cy + 2, player.width / 2, 0, Math.PI * 2);
   ctx.fill();
+  // Head
+  ctx.fillStyle = '#e9d5b3';
+  ctx.beginPath();
+  ctx.arc(cx, cy - 4, player.width / 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  // Hat
+  ctx.fillStyle = '#1a1024';
+  ctx.fillRect(cx - 9, cy - 12, 18, 4);
+  ctx.fillRect(cx - 14, cy - 9, 28, 3);
 
-  // Reset alpha so shield visuals are not affected by invulnerability flicker
   ctx.globalAlpha = 1;
   drawCounterShield(ctx, player, camera);
-  if (player.invulnerable) {
-    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 50);
-  }
-  
-  // Draw player direction indicator
-  ctx.fillStyle = '#F3F4F6';
-  
-  const indicatorSize = player.width / 4;
-  const centerX = player.x + player.width / 2 - camera.x;
-  const centerY = player.y + player.height / 2 - camera.y;
-  const distance = player.width / 2 - indicatorSize / 2;
-  
-  let indicatorX = centerX;
-  let indicatorY = centerY;
-  
-  switch (player.direction) {
-    case 'up':
-      indicatorY = centerY - distance;
-      break;
-    case 'down':
-      indicatorY = centerY + distance;
-      break;
-    case 'left':
-      indicatorX = centerX - distance;
-      break;
-    case 'right':
-      indicatorX = centerX + distance;
-      break;
-  }
-  
-  if (player.direction !== 'idle') {
-    ctx.beginPath();
-    ctx.arc(indicatorX, indicatorY, indicatorSize, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  
-  // Reset alpha
-  ctx.globalAlpha = 1;
 };
 
-// Draw enemy
+const drawHealthBar = (
+  ctx: CanvasRenderingContext2D,
+  enemy: Enemy,
+  camera: { x: number; y: number }
+) => {
+  if (enemy.health >= enemy.maxHealth) return;
+  const w = enemy.width;
+  const h = 3;
+  const x = enemy.x - camera.x;
+  const y = enemy.y - h - 2 - camera.y;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(x, y, w, h);
+  const pct = enemy.health / enemy.maxHealth;
+  ctx.fillStyle = pct < 0.3 ? '#ef4444' : '#10b981';
+  ctx.fillRect(x, y, w * pct, h);
+};
+
 const drawEnemy = (
   ctx: CanvasRenderingContext2D,
   enemy: Enemy,
-  camera: {
-    x: number;
-    y: number;
-  }
+  camera: { x: number; y: number }
 ) => {
-  // Get enemy color based on type
+  const cx = enemy.x + enemy.width / 2 - camera.x;
+  const cy = enemy.y + enemy.height / 2 - camera.y;
   const color = getEnemyColor(enemy.type);
-  
-  // Draw enemy body
-  ctx.fillStyle = color;
-  
-  // Different shapes for different enemy types
+  const w = enemy.width;
+  const h = enemy.height;
+
+  ctx.save();
+  if (enemy.type === 'ghost') ctx.globalAlpha = 0.65;
+
   switch (enemy.type) {
-    case 'basic':
+    case 'bat': {
+      ctx.fillStyle = color;
+      // Body
       ctx.beginPath();
-      ctx.arc(
-        enemy.x + enemy.width / 2 - camera.x,
-        enemy.y + enemy.height / 2 - camera.y,
-        enemy.width / 2,
-        0,
-        Math.PI * 2
-      );
+      ctx.ellipse(cx, cy, w / 3, h / 2.5, 0, 0, Math.PI * 2);
       ctx.fill();
-      break;
-    
-    case 'fast':
-      // Triangle shape for fast enemies
+      // Wings flap with time
+      const wing = (Math.sin(Date.now() / 80) + 1) * 0.5;
       ctx.beginPath();
-      ctx.moveTo(enemy.x + enemy.width / 2 - camera.x, enemy.y - camera.y);
-      ctx.lineTo(enemy.x + enemy.width - camera.x, enemy.y + enemy.height - camera.y);
-      ctx.lineTo(enemy.x - camera.x, enemy.y + enemy.height - camera.y);
-      ctx.closePath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx - w / 2 - wing * 4, cy - h / 3);
+      ctx.lineTo(cx - w / 3, cy + 1);
       ctx.fill();
-      break;
-    
-    case 'tank':
-      // Square shape for tank enemies
-      ctx.fillRect(enemy.x - camera.x, enemy.y - camera.y, enemy.width, enemy.height);
-      break;
-    
-    case 'ranged':
-      // Diamond shape for ranged enemies
       ctx.beginPath();
-      ctx.moveTo(enemy.x + enemy.width / 2 - camera.x, enemy.y - camera.y);
-      ctx.lineTo(enemy.x + enemy.width - camera.x, enemy.y + enemy.height / 2 - camera.y);
-      ctx.lineTo(enemy.x + enemy.width / 2 - camera.x, enemy.y + enemy.height - camera.y);
-      ctx.lineTo(enemy.x - camera.x, enemy.y + enemy.height / 2 - camera.y);
-      ctx.closePath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + w / 2 + wing * 4, cy - h / 3);
+      ctx.lineTo(cx + w / 3, cy + 1);
       ctx.fill();
+      // Eyes
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(cx - 3, cy - 2, 2, 2);
+      ctx.fillRect(cx + 1, cy - 2, 2, 2);
       break;
-    
-    case 'boss':
-      // Star shape for boss enemies
-      const centerX = enemy.x + enemy.width / 2 - camera.x;
-      const centerY = enemy.y + enemy.height / 2 - camera.y;
-      const outerRadius = enemy.width / 2;
-      const innerRadius = enemy.width / 4;
-      const spikes = 8;
-      
-      ctx.beginPath();
-      for (let i = 0; i < spikes * 2; i++) {
-        const radius = i % 2 === 0 ? outerRadius : innerRadius;
-        const angle = (Math.PI * i) / spikes;
-        const x = centerX + radius * Math.cos(angle);
-        const y = centerY + radius * Math.sin(angle);
-        
-        if (i === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-      ctx.closePath();
-      ctx.fill();
-      break;
-    
-    default:
-      ctx.beginPath();
-      ctx.arc(
-        enemy.x + enemy.width / 2 - camera.x,
-        enemy.y + enemy.height / 2 - camera.y,
-        enemy.width / 2,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-      break;
-  }
-  
-  // Draw health bar
-  const healthBarWidth = enemy.width;
-  const healthBarHeight = 4;
-  const healthPercent = enemy.health / enemy.maxHealth;
-  
-  // Health bar background
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-  ctx.fillRect(
-    enemy.x - camera.x,
-    enemy.y - healthBarHeight - 2 - camera.y,
-    healthBarWidth,
-    healthBarHeight
-  );
-  
-  // Health bar fill
-  ctx.fillStyle = enemy.health < enemy.maxHealth * 0.3 ? '#EF4444' : '#10B981';
-  ctx.fillRect(
-    enemy.x - camera.x,
-    enemy.y - healthBarHeight - 2 - camera.y,
-    healthBarWidth * healthPercent,
-    healthBarHeight
-  );
-  
-  // If enemy was hit recently, add hit flash effect
-  if (Date.now() - enemy.lastHit < 100) {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    
-    switch (enemy.type) {
-      case 'basic':
-        ctx.beginPath();
-        ctx.arc(
-          enemy.x + enemy.width / 2 - camera.x,
-          enemy.y + enemy.height / 2 - camera.y,
-          enemy.width / 2,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-        break;
-      
-      case 'fast':
-        ctx.beginPath();
-        ctx.moveTo(enemy.x + enemy.width / 2 - camera.x, enemy.y - camera.y);
-        ctx.lineTo(enemy.x + enemy.width - camera.x, enemy.y + enemy.height - camera.y);
-        ctx.lineTo(enemy.x - camera.x, enemy.y + enemy.height - camera.y);
-        ctx.closePath();
-        ctx.fill();
-        break;
-      
-      case 'tank':
-        ctx.fillRect(enemy.x - camera.x, enemy.y - camera.y, enemy.width, enemy.height);
-        break;
-      
-      case 'ranged':
-        ctx.beginPath();
-        ctx.moveTo(enemy.x + enemy.width / 2 - camera.x, enemy.y - camera.y);
-        ctx.lineTo(enemy.x + enemy.width - camera.x, enemy.y + enemy.height / 2 - camera.y);
-        ctx.lineTo(enemy.x + enemy.width / 2 - camera.x, enemy.y + enemy.height - camera.y);
-        ctx.lineTo(enemy.x - camera.x, enemy.y + enemy.height / 2 - camera.y);
-        ctx.closePath();
-        ctx.fill();
-        break;
-      
-      case 'boss':
-        ctx.beginPath();
-        ctx.arc(
-          enemy.x + enemy.width / 2 - camera.x,
-          enemy.y + enemy.height / 2 - camera.y,
-          enemy.width / 2,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-        break;
     }
+    case 'skeleton': {
+      // Body/cloak
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(cx - w / 3, cy - h / 4, (w / 3) * 2, h / 2);
+      // Skull
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(cx, cy - h / 4, w / 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Sockets
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(cx - 4, cy - h / 4 - 1, 3, 3);
+      ctx.fillRect(cx + 1, cy - h / 4 - 1, 3, 3);
+      break;
+    }
+    case 'zombie': {
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - w / 2.5, cy - h / 2.2, (w / 2.5) * 2, (h / 2.2) * 2);
+      // Darker head
+      ctx.fillStyle = '#3f5326';
+      ctx.fillRect(cx - w / 3, cy - h / 2.2, (w / 3) * 2, h / 2.5);
+      // Eyes
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(cx - 5, cy - h / 3, 3, 3);
+      ctx.fillRect(cx + 2, cy - h / 3, 3, 3);
+      break;
+    }
+    case 'plant': {
+      // Pot
+      ctx.fillStyle = '#5c3a1c';
+      ctx.fillRect(cx - w / 3, cy + h / 6, (w / 3) * 2, h / 3);
+      // Stem
+      ctx.fillStyle = '#1f5a1f';
+      ctx.fillRect(cx - 1, cy - h / 6, 2, h / 3);
+      // Bulb
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(cx, cy - h / 4, w / 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Teeth/maw
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(cx - 4, cy - h / 5, 2, 3);
+      ctx.fillRect(cx + 2, cy - h / 5, 2, 3);
+      break;
+    }
+    case 'ghost': {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx - w / 2.4, cy + h / 2);
+      ctx.lineTo(cx - w / 2.4, cy);
+      ctx.arc(cx, cy, w / 2.4, Math.PI, 0);
+      ctx.lineTo(cx + w / 2.4, cy + h / 2);
+      // Wavy bottom
+      const wave = Math.sin(Date.now() / 120) * 2;
+      ctx.lineTo(cx + w / 4, cy + h / 2 - 4 + wave);
+      ctx.lineTo(cx, cy + h / 2 + wave);
+      ctx.lineTo(cx - w / 4, cy + h / 2 - 4 - wave);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(cx - 4, cy - 2, 2, 4);
+      ctx.fillRect(cx + 2, cy - 2, 2, 4);
+      break;
+    }
+    case 'werewolf': {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, w / 2.5, h / 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Ears
+      ctx.beginPath();
+      ctx.moveTo(cx - w / 3, cy - h / 3);
+      ctx.lineTo(cx - w / 4, cy - h / 2);
+      ctx.lineTo(cx - w / 5, cy - h / 3);
+      ctx.moveTo(cx + w / 3, cy - h / 3);
+      ctx.lineTo(cx + w / 4, cy - h / 2);
+      ctx.lineTo(cx + w / 5, cy - h / 3);
+      ctx.fill();
+      // Eyes
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(cx - 5, cy - 2, 3, 3);
+      ctx.fillRect(cx + 2, cy - 2, 3, 3);
+      // Fangs
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(cx - 3, cy + 4, 2, 4);
+      ctx.fillRect(cx + 1, cy + 4, 2, 4);
+      break;
+    }
+    case 'pumpkin': {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, w / 2.1, h / 2.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Ridges
+      ctx.strokeStyle = '#7c2d12';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - w / 3, cy - h / 4);
+      ctx.lineTo(cx - w / 3, cy + h / 4);
+      ctx.moveTo(cx, cy - h / 3);
+      ctx.lineTo(cx, cy + h / 3);
+      ctx.moveTo(cx + w / 3, cy - h / 4);
+      ctx.lineTo(cx + w / 3, cy + h / 4);
+      ctx.stroke();
+      // Face
+      ctx.fillStyle = '#fde047';
+      const triangle = (px: number, py: number, s: number) => {
+        ctx.beginPath();
+        ctx.moveTo(px, py - s);
+        ctx.lineTo(px + s, py + s);
+        ctx.lineTo(px - s, py + s);
+        ctx.closePath();
+        ctx.fill();
+      };
+      triangle(cx - 7, cy - 3, 4);
+      triangle(cx + 7, cy - 3, 4);
+      ctx.fillRect(cx - 7, cy + 5, 14, 3);
+      // Stem
+      ctx.fillStyle = '#15803d';
+      ctx.fillRect(cx - 3, cy - h / 2 - 2, 6, 5);
+      break;
+    }
+    case 'giantbat': {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, w / 2.5, h / 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      const flap = (Math.sin(Date.now() / 90) + 1) * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx - w / 1.5 - flap * 10, cy - h / 3);
+      ctx.lineTo(cx - w / 2.5, cy + h / 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + w / 1.5 + flap * 10, cy - h / 3);
+      ctx.lineTo(cx + w / 2.5, cy + h / 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(cx - 7, cy - 4, 4, 4);
+      ctx.fillRect(cx + 3, cy - 4, 4, 4);
+      break;
+    }
+    case 'reaper': {
+      // Cloak
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx - w / 2, cy - h / 2.5);
+      ctx.quadraticCurveTo(cx, cy - h / 2, cx + w / 2, cy - h / 2.5);
+      ctx.lineTo(cx + w / 2.2, cy + h / 2);
+      ctx.lineTo(cx - w / 2.2, cy + h / 2);
+      ctx.closePath();
+      ctx.fill();
+      // Glowing eyes
+      const pulse = 0.7 + Math.sin(Date.now() / 200) * 0.3;
+      ctx.fillStyle = '#dc2626';
+      ctx.shadowColor = '#dc2626';
+      ctx.shadowBlur = 14 * pulse;
+      ctx.fillRect(cx - 12, cy - 6, 6, 6);
+      ctx.fillRect(cx + 6, cy - 6, 6, 6);
+      ctx.shadowBlur = 0;
+      // Scythe
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx + w / 2, cy + h / 2);
+      ctx.lineTo(cx + w / 1.5, cy - h / 2.5);
+      ctx.stroke();
+      ctx.fillStyle = '#cbd5e1';
+      ctx.beginPath();
+      ctx.moveTo(cx + w / 1.5, cy - h / 2.5);
+      ctx.quadraticCurveTo(cx + w, cy - h / 2.2, cx + w / 1.2, cy - h / 1.8);
+      ctx.fill();
+      break;
+    }
+  }
+  ctx.restore();
+  drawHealthBar(ctx, enemy, camera);
+
+  if (Date.now() - enemy.lastHit < 90) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(w, h) / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 };
 
-// Draw projectile
 const drawProjectile = (
   ctx: CanvasRenderingContext2D,
   projectile: Projectile,
-  camera: {
-    x: number;
-    y: number;
-  }
+  camera: { x: number; y: number }
 ) => {
-  // Reflected projectiles get a gold trail overlay so the player can see
-  // their own counter-attack hurtling back at the enemy.
   if (projectile.reflected) {
     const cx = projectile.x + projectile.width / 2 - camera.x;
     const cy = projectile.y + projectile.height / 2 - camera.y;
@@ -463,49 +450,29 @@ const drawProjectile = (
     ctx.restore();
   }
 
-  // Different colors and shapes based on weapon type
   switch (projectile.weaponType) {
-    case 'knife':
-      // Knife - elongated shape
-      ctx.fillStyle = '#E5E7EB';
-      
-      // Rotate based on direction
+    case 'knife': {
+      ctx.fillStyle = '#e5e7eb';
       const angle = Math.atan2(projectile.direction.y, projectile.direction.x);
-      
       ctx.save();
       ctx.translate(
         projectile.x + projectile.width / 2 - camera.x,
         projectile.y + projectile.height / 2 - camera.y
       );
       ctx.rotate(angle);
-      
-      // Draw knife shape
-      ctx.fillRect(
-        -projectile.width / 2,
-        -projectile.height / 4,
-        projectile.width,
-        projectile.height / 2
-      );
-      
+      ctx.fillRect(-projectile.width / 2, -projectile.height / 4, projectile.width, projectile.height / 2);
       ctx.restore();
       break;
-    
-    case 'axe':
-      // Axe - spinning shape
-      ctx.fillStyle = '#A78BFA';
-      
-      // Spinning animation
-      const rotationSpeed = 0.01;
-      const rotationAngle = (Date.now() * rotationSpeed) % (Math.PI * 2);
-      
+    }
+    case 'axe': {
+      ctx.fillStyle = '#a78bfa';
+      const rot = (Date.now() * 0.012) % (Math.PI * 2);
       ctx.save();
       ctx.translate(
         projectile.x + projectile.width / 2 - camera.x,
         projectile.y + projectile.height / 2 - camera.y
       );
-      ctx.rotate(rotationAngle);
-      
-      // Draw axe shape
+      ctx.rotate(rot);
       ctx.beginPath();
       ctx.moveTo(0, -projectile.height / 2);
       ctx.lineTo(projectile.width / 2, 0);
@@ -513,170 +480,99 @@ const drawProjectile = (
       ctx.lineTo(-projectile.width / 2, 0);
       ctx.closePath();
       ctx.fill();
-      
       ctx.restore();
       break;
-    
-    case 'wand':
-      // Magic wand - glowing orb
-      const gradient = ctx.createRadialGradient(
-        projectile.x + projectile.width / 2 - camera.x,
-        projectile.y + projectile.height / 2 - camera.y,
-        0,
-        projectile.x + projectile.width / 2 - camera.x,
-        projectile.y + projectile.height / 2 - camera.y,
-        projectile.width / 2
-      );
-      
-      gradient.addColorStop(0, '#F9A8D4');
-      gradient.addColorStop(1, '#A78BFA');
-      
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(
-        projectile.x + projectile.width / 2 - camera.x,
-        projectile.y + projectile.height / 2 - camera.y,
-        projectile.width / 2,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-      
-      // Add glow effect
-      ctx.shadowColor = '#F9A8D4';
+    }
+    case 'wand': {
+      const cx = projectile.x + projectile.width / 2 - camera.x;
+      const cy = projectile.y + projectile.height / 2 - camera.y;
+      const r = projectile.width / 2;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, '#f9a8d4');
+      g.addColorStop(1, '#a78bfa');
+      ctx.fillStyle = g;
+      ctx.shadowColor = '#f9a8d4';
       ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.arc(
-        projectile.x + projectile.width / 2 - camera.x,
-        projectile.y + projectile.height / 2 - camera.y,
-        projectile.width / 2 - 2,
-        0,
-        Math.PI * 2
-      );
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
       break;
-    
-    case 'whip':
-      // Whip - arc shape
-      ctx.strokeStyle = '#F97316';
-      ctx.lineWidth = 3;
-      
-      // Animate whip by changing its length over time
-      const progress = Math.min(1, (Date.now() - projectile.createdAt) / 200);
-      const whipLength = projectile.width * progress;
-      
-      // Draw arc in the direction of the attack
-      ctx.beginPath();
-      
-      const centerX = projectile.x + projectile.width / 2 - camera.x;
-      const centerY = projectile.y + projectile.height / 2 - camera.y;
-      
-      const arcStartAngle = Math.atan2(projectile.direction.y, projectile.direction.x) - Math.PI / 3;
-      const arcEndAngle = Math.atan2(projectile.direction.y, projectile.direction.x) + Math.PI / 3;
-      
-      ctx.arc(centerX, centerY, whipLength / 2, arcStartAngle, arcEndAngle);
-      ctx.stroke();
+    }
+    case 'whip': {
+      // Slash slab — fade-in then fade-out across the projectile's duration.
+      const t = (Date.now() - projectile.createdAt) / Math.max(50, projectile.duration);
+      const alpha = Math.max(0, 1 - Math.abs(t - 0.4) * 2);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const px = projectile.x - camera.x;
+      const py = projectile.y - camera.y;
+      const grad = ctx.createLinearGradient(px, py, px + projectile.width, py);
+      if (projectile.direction.x >= 0) {
+        grad.addColorStop(0, 'rgba(255,255,255,0)');
+        grad.addColorStop(1, 'rgba(252, 211, 77, 0.9)');
+      } else {
+        grad.addColorStop(0, 'rgba(252, 211, 77, 0.9)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+      }
+      ctx.fillStyle = grad;
+      ctx.fillRect(px, py, projectile.width, projectile.height);
+      ctx.restore();
       break;
-    
-    case 'bible':
-      // Bible - rotating square
-      ctx.fillStyle = '#FBBF24';
-      
-      const bibleRotation = (Date.now() * 0.005) % (Math.PI * 2);
-      
+    }
+    case 'bible': {
+      ctx.fillStyle = '#fbbf24';
+      const rot = (Date.now() * 0.005) % (Math.PI * 2);
       ctx.save();
       ctx.translate(
         projectile.x + projectile.width / 2 - camera.x,
         projectile.y + projectile.height / 2 - camera.y
       );
-      ctx.rotate(bibleRotation);
-      
-      ctx.fillRect(
-        -projectile.width / 2,
-        -projectile.height / 2,
-        projectile.width,
-        projectile.height
-      );
-      
-      // Add cross design
-      ctx.fillStyle = '#F3F4F6';
-      const crossWidth = projectile.width * 0.2;
-      const crossHeight = projectile.height * 0.6;
-      
-      ctx.fillRect(
-        -crossWidth / 2,
-        -crossHeight / 2,
-        crossWidth,
-        crossHeight
-      );
-      
-      ctx.fillRect(
-        -crossHeight / 2,
-        -crossWidth / 2,
-        crossHeight,
-        crossWidth
-      );
-      
+      ctx.rotate(rot);
+      ctx.fillRect(-projectile.width / 2, -projectile.height / 2, projectile.width, projectile.height);
+      ctx.fillStyle = '#f3f4f6';
+      const cw = projectile.width * 0.2;
+      const ch = projectile.height * 0.6;
+      ctx.fillRect(-cw / 2, -ch / 2, cw, ch);
+      ctx.fillRect(-ch / 2, -cw / 2, ch, cw);
       ctx.restore();
       break;
-    
+    }
     case 'enemy_bolt': {
-      // Reflected enemy bolts are already drawn with the gold trail above;
-      // skip the red core so the visual stays clearly "yours".
       if (projectile.reflected) break;
       const cx = projectile.x + projectile.width / 2 - camera.x;
       const cy = projectile.y + projectile.height / 2 - camera.y;
-      const radius = projectile.width / 2;
-
-      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-      gradient.addColorStop(0, '#FCA5A5');
-      gradient.addColorStop(1, '#7F1D1D');
+      const r = projectile.width / 2;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, '#fca5a5');
+      g.addColorStop(1, '#7f1d1d');
       ctx.save();
-      ctx.shadowColor = '#EF4444';
+      ctx.shadowColor = '#ef4444';
       ctx.shadowBlur = 10;
-      ctx.fillStyle = gradient;
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
       break;
     }
-
-    case 'garlic':
-      // Garlic - pulsing circle aura
-      const pulseRate = 0.003;
-      const pulse = 0.8 + 0.2 * Math.sin(Date.now() * pulseRate);
-      const radius = (projectile.width / 2) * pulse;
-      
-      const garlicGradient = ctx.createRadialGradient(
-        projectile.x + projectile.width / 2 - camera.x,
-        projectile.y + projectile.height / 2 - camera.y,
-        0,
-        projectile.x + projectile.width / 2 - camera.x,
-        projectile.y + projectile.height / 2 - camera.y,
-        radius
-      );
-      
-      garlicGradient.addColorStop(0, 'rgba(109, 40, 217, 0.2)');
-      garlicGradient.addColorStop(0.7, 'rgba(109, 40, 217, 0.1)');
-      garlicGradient.addColorStop(1, 'rgba(109, 40, 217, 0)');
-      
-      ctx.fillStyle = garlicGradient;
+    case 'garlic': {
+      const cx = projectile.x + projectile.width / 2 - camera.x;
+      const cy = projectile.y + projectile.height / 2 - camera.y;
+      const pulse = 0.85 + 0.15 * Math.sin(Date.now() * 0.005);
+      const r = (projectile.width / 2) * pulse;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, 'rgba(253, 230, 138, 0.25)');
+      g.addColorStop(0.6, 'rgba(253, 230, 138, 0.12)');
+      g.addColorStop(1, 'rgba(253, 230, 138, 0)');
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(
-        projectile.x + projectile.width / 2 - camera.x,
-        projectile.y + projectile.height / 2 - camera.y,
-        radius,
-        0,
-        Math.PI * 2
-      );
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
       break;
-    
-    default:
-      // Default projectile
-      ctx.fillStyle = '#F3F4F6';
+    }
+    default: {
+      ctx.fillStyle = '#f3f4f6';
       ctx.beginPath();
       ctx.arc(
         projectile.x + projectile.width / 2 - camera.x,
@@ -687,126 +583,97 @@ const drawProjectile = (
       );
       ctx.fill();
       break;
+    }
   }
 };
 
-// Draw pickup
+// Gem tier colors derived from value: 1 = blue, 2-4 = green, 5+ = red.
+const gemColorFor = (value: number): { fill: string; shimmer: string } => {
+  if (value >= 5) return { fill: '#ef4444', shimmer: '#fecaca' };
+  if (value >= 2) return { fill: '#10b981', shimmer: '#a7f3d0' };
+  return { fill: '#3b82f6', shimmer: '#bfdbfe' };
+};
+
 const drawPickup = (
   ctx: CanvasRenderingContext2D,
   pickup: Pickup,
-  camera: {
-    x: number;
-    y: number;
-  }
+  camera: { x: number; y: number }
 ) => {
-  const centerX = pickup.x + 8 - camera.x;
-  const centerY = pickup.y + 8 - camera.y;
+  const cx = pickup.x + 8 - camera.x;
+  const cy = pickup.y + 8 - camera.y;
   const size = 16;
-  
-  // Draw different pickup types
+  const floatOffset = Math.sin(Date.now() / 300 + pickup.x * 0.01) * 2;
+  const drawY = cy + floatOffset;
+
   switch (pickup.type) {
-    case 'experience':
-      // Experience gem
-      ctx.fillStyle = '#10B981';
-      
-      // Diamond shape
+    case 'experience': {
+      const { fill, shimmer } = gemColorFor(pickup.value);
+      ctx.fillStyle = fill;
       ctx.beginPath();
-      ctx.moveTo(centerX, pickup.y - camera.y);
-      ctx.lineTo(pickup.x + size - camera.x, centerY);
-      ctx.lineTo(centerX, pickup.y + size - camera.y);
-      ctx.lineTo(pickup.x - camera.x, centerY);
+      ctx.moveTo(cx, drawY - size / 2);
+      ctx.lineTo(cx + size / 2, drawY);
+      ctx.lineTo(cx, drawY + size / 2);
+      ctx.lineTo(cx - size / 2, drawY);
       ctx.closePath();
       ctx.fill();
-      
-      // Add shimmer effect
-      const shimmerOpacity = 0.5 + 0.5 * Math.sin(Date.now() / 200);
-      ctx.fillStyle = `rgba(243, 244, 246, ${shimmerOpacity})`;
-      
+      const a = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+      ctx.fillStyle = shimmer;
+      ctx.globalAlpha = a;
       ctx.beginPath();
-      ctx.moveTo(centerX, pickup.y + 4 - camera.y);
-      ctx.lineTo(pickup.x + size - 4 - camera.x, centerY);
-      ctx.lineTo(centerX, pickup.y + size - 4 - camera.y);
-      ctx.lineTo(pickup.x + 4 - camera.x, centerY);
+      ctx.moveTo(cx, drawY - 4);
+      ctx.lineTo(cx + 4, drawY);
+      ctx.lineTo(cx, drawY + 4);
+      ctx.lineTo(cx - 4, drawY);
       ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'health': {
+      // Roasted chicken pickup. Drum-shaped body with a bone.
+      ctx.fillStyle = '#b45309';
+      ctx.beginPath();
+      ctx.ellipse(cx, drawY + 1, 8, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fef3c7';
+      ctx.fillRect(cx - 1, drawY - 7, 2, 5);
+      ctx.beginPath();
+      ctx.arc(cx, drawY - 7, 2.5, 0, Math.PI * 2);
       ctx.fill();
       break;
-    
-    case 'health':
-      // Health potion
-      ctx.fillStyle = '#EF4444';
-      
-      // Rounded rectangle for bottle
-      const bottleWidth = 10;
-      const bottleHeight = 14;
-      const bottleX = centerX - bottleWidth / 2;
-      const bottleY = centerY - bottleHeight / 2;
-      
+    }
+    case 'magnet': {
+      ctx.strokeStyle = '#1d4ed8';
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(bottleX + 3, bottleY);
-      ctx.lineTo(bottleX + bottleWidth - 3, bottleY);
-      ctx.quadraticCurveTo(bottleX + bottleWidth, bottleY, bottleX + bottleWidth, bottleY + 3);
-      ctx.lineTo(bottleX + bottleWidth, bottleY + bottleHeight - 3);
-      ctx.quadraticCurveTo(bottleX + bottleWidth, bottleY + bottleHeight, bottleX + bottleWidth - 3, bottleY + bottleHeight);
-      ctx.lineTo(bottleX + 3, bottleY + bottleHeight);
-      ctx.quadraticCurveTo(bottleX, bottleY + bottleHeight, bottleX, bottleY + bottleHeight - 3);
-      ctx.lineTo(bottleX, bottleY + 3);
-      ctx.quadraticCurveTo(bottleX, bottleY, bottleX + 3, bottleY);
-      ctx.closePath();
-      ctx.fill();
-      
-      // Bottle neck
-      ctx.fillStyle = '#F3F4F6';
-      ctx.fillRect(centerX - 2, bottleY - 3, 4, 3);
-      
-      // Cross symbol
-      ctx.strokeStyle = '#F3F4F6';
-      ctx.lineWidth = 2;
-      
-      ctx.beginPath();
-      ctx.moveTo(centerX - 3, centerY);
-      ctx.lineTo(centerX + 3, centerY);
-      ctx.moveTo(centerX, centerY - 3);
-      ctx.lineTo(centerX, centerY + 3);
+      ctx.arc(cx, drawY + 1, 6, Math.PI, 0);
       ctx.stroke();
+      ctx.fillStyle = '#dc2626';
+      ctx.fillRect(cx - 8, drawY, 4, 5);
+      ctx.fillStyle = '#1d4ed8';
+      ctx.fillRect(cx + 4, drawY, 4, 5);
       break;
-    
-    case 'magnet':
-      // Magnet
-      ctx.fillStyle = '#3B82F6';
-      
-      // Horseshoe magnet shape
+    }
+    case 'bomb': {
+      ctx.fillStyle = '#0f172a';
       ctx.beginPath();
-      ctx.moveTo(centerX - 5, centerY - 5);
-      ctx.lineTo(centerX - 5, centerY + 5);
-      ctx.quadraticCurveTo(centerX, centerY + 8, centerX + 5, centerY + 5);
-      ctx.lineTo(centerX + 5, centerY - 5);
-      ctx.stroke();
-      
-      // Magnet poles
-      ctx.fillStyle = '#EF4444';
-      ctx.fillRect(centerX - 7, centerY - 7, 4, 4);
-      
-      ctx.fillStyle = '#3B82F6';
-      ctx.fillRect(centerX + 3, centerY - 7, 4, 4);
+      ctx.arc(cx, drawY + 1, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(cx - 1, drawY - 8, 2, 4);
+      // Spark
+      const spark = (Math.sin(Date.now() / 80) + 1) * 0.5;
+      ctx.fillStyle = '#fef08a';
+      ctx.beginPath();
+      ctx.arc(cx, drawY - 10, 2 + spark * 1.5, 0, Math.PI * 2);
+      ctx.fill();
       break;
+    }
   }
-  
-  // Add floating animation
-  const floatOffset = Math.sin(Date.now() / 300) * 2;
-  ctx.save();
-  ctx.translate(0, floatOffset);
-  
-  // Add subtle glow
-  ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
-  ctx.shadowBlur = 5;
-  
-  ctx.restore();
 };
 
-// Format time (seconds to MM:SS)
 export const formatTime = (seconds: number): string => {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = Math.floor(seconds % 60);
-  
   return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 };

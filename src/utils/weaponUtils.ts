@@ -1,274 +1,162 @@
 import { Weapon, CharacterClass, WeaponType, Projectile, Player, Enemy } from '../types/game';
 import { useGameStore } from '../store/gameStore';
 
-// Generate starting weapons based on character class
+// Starting weapons modeled after Vampire Survivors' default-character map:
+//   warrior  ≈ Antonio   → Whip
+//   mage     ≈ Imelda    → Magic Wand (auto-target)
+//   rogue    ≈ Pasqualina→ Knife (linear throw)
+//   necromancer ≈ Arca/Poppea → Garlic (aura)
 export const getStartingWeapons = (characterClass: CharacterClass): Weapon[] => {
   switch (characterClass) {
     case 'warrior':
       return [{
-        id: 'weapon-sword',
-        name: '剣',
-        type: 'knife',
-        damage: 10,
-        cooldown: 300, // Reduced from 600 to 300
+        id: 'weapon-whip',
+        name: '鞭',
+        type: 'whip',
+        damage: 12,
+        cooldown: 1200,
         lastFired: 0,
         level: 1,
-        projectileSpeed: 300,
-        projectileSize: 16,
-        passthrough: false
+        area: 130,
+        duration: 220
       }];
-    
+
     case 'mage':
       return [{
         id: 'weapon-wand',
         name: '魔法の杖',
         type: 'wand',
-        damage: 8,
-        cooldown: 250, // Reduced from 500 to 250
+        damage: 10,
+        cooldown: 1100,
         lastFired: 0,
         level: 1,
-        projectileSpeed: 350,
-        projectileSize: 12,
+        projectileSpeed: 360,
+        projectileSize: 14,
         passthrough: false
       }];
-    
+
     case 'rogue':
       return [{
-        id: 'weapon-dagger',
+        id: 'weapon-knife',
         name: '投げナイフ',
         type: 'knife',
-        damage: 6,
-        cooldown: 200, // Reduced from 400 to 200
+        damage: 8,
+        cooldown: 600,
         lastFired: 0,
         level: 1,
-        projectileSpeed: 400,
-        projectileSize: 10,
+        projectileSpeed: 420,
+        projectileSize: 12,
         passthrough: false,
-        count: 2
+        count: 1
       }];
-    
+
     case 'necromancer':
       return [{
-        id: 'weapon-whip',
-        name: '闇の鞭',
-        type: 'whip',
-        damage: 12,
-        cooldown: 350, // Reduced from 700 to 350
+        id: 'weapon-garlic',
+        name: 'ニンニク',
+        type: 'garlic',
+        damage: 4,
+        cooldown: 800,
         lastFired: 0,
         level: 1,
-        area: 100,
-        duration: 300
+        area: 110
       }];
-    
+
     default:
       return [{
-        id: 'weapon-basic',
-        name: '基本武器',
-        type: 'knife',
-        damage: 5,
-        cooldown: 300, // Reduced from 600 to 300
+        id: 'weapon-whip',
+        name: '鞭',
+        type: 'whip',
+        damage: 10,
+        cooldown: 1200,
         lastFired: 0,
         level: 1,
-        projectileSpeed: 250,
-        projectileSize: 12,
-        passthrough: false
+        area: 120,
+        duration: 220
       }];
   }
 };
 
-// Fire projectiles based on weapon type
+// Whip slash counter — global flip flag so the whip alternates left/right
+// like in VS (Antonio's iconic forward/back slash cycle).
+let whipSwingLeft = false;
+
+// Per-weapon kind, return the projectiles fired this tick (cooldown-aware).
 export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Projectile[] => {
   const projectiles: Projectile[] = [];
   const now = Date.now();
-  
-  // Check if weapon is on cooldown
+
   if (now - weapon.lastFired < weapon.cooldown) {
     return [];
   }
-  
-  // Handle different weapon types
+
   switch (weapon.type) {
-    case 'knife':
-      // Get direction from player's last known direction or current direction
-      let direction = { x: 0, y: -1 }; // Default up
-      
+    case 'knife': {
+      // Linear throw in the player's last move direction; default = up.
+      let direction = { x: 0, y: -1 };
       if (player.lastDirection) {
-        // Use last swipe direction if available
         direction = { ...player.lastDirection };
       } else if (player.direction !== 'idle') {
-        // Otherwise use the direction the player is moving
         if (player.direction === 'right') direction = { x: 1, y: 0 };
         else if (player.direction === 'left') direction = { x: -1, y: 0 };
         else if (player.direction === 'down') direction = { x: 0, y: 1 };
         else if (player.direction === 'up') direction = { x: 0, y: -1 };
       }
-      
-      // Handle multiple projectiles if count is specified
-      const count = weapon.count || 1;
-      const spread = 0.2; // Angle spread between multiple projectiles
-      
+
+      const count = (weapon.count || 1) + Math.floor(weapon.level / 2);
+      const spread = 0.18;
+
       for (let i = 0; i < count; i++) {
-        let projectileDirection = { ...direction };
-        
-        // Add spread for multiple projectiles
+        let pd = { ...direction };
         if (count > 1) {
           const angle = -spread * (count - 1) / 2 + i * spread;
           const cos = Math.cos(angle);
           const sin = Math.sin(angle);
-          
-          projectileDirection = {
+          pd = {
             x: direction.x * cos - direction.y * sin,
             y: direction.x * sin + direction.y * cos
           };
         }
-        
+
         projectiles.push({
           id: `proj-${weapon.id}-${now}-${i}`,
-          x: player.x + player.width / 2 - (weapon.projectileSize || 8) / 2,
-          y: player.y + player.height / 2 - (weapon.projectileSize || 8) / 2,
-          width: weapon.projectileSize || 16,
-          height: weapon.projectileSize || 16,
-          speed: weapon.projectileSpeed || 300,
-          damage: weapon.damage,
-          direction: projectileDirection,
-          weaponType: weapon.type,
-          duration: 2000,
-          createdAt: now,
-          passthrough: weapon.passthrough || false,
-          hitEnemies: [],
-          hostile: false,
-          reflected: false
-        });
-      }
-      break;
-
-    case 'axe':
-      // Axe is a spinning projectile that returns to player
-      projectiles.push({
-        id: `proj-${weapon.id}-${now}`,
-        x: player.x + player.width / 2 - (weapon.projectileSize || 24) / 2,
-        y: player.y + player.height / 2 - (weapon.projectileSize || 24) / 2,
-        width: weapon.projectileSize || 24,
-        height: weapon.projectileSize || 24,
-        speed: weapon.projectileSpeed || 250,
-        damage: weapon.damage,
-        direction: { x: Math.random() * 2 - 1, y: Math.random() * 2 - 1 },
-        weaponType: weapon.type,
-        duration: 3000,
-        createdAt: now,
-        passthrough: true,
-        hitEnemies: [],
-        hostile: false,
-        reflected: false
-      });
-      break;
-    
-    case 'wand':
-      // Wand targets the nearest enemy
-      if (enemies.length > 0) {
-        // Find the closest enemy
-        let closest = enemies[0];
-        let closestDistance = Math.hypot(
-          closest.x - player.x,
-          closest.y - player.y
-        );
-        
-        for (let i = 1; i < enemies.length; i++) {
-          const distance = Math.hypot(
-            enemies[i].x - player.x,
-            enemies[i].y - player.y
-          );
-          
-          if (distance < closestDistance) {
-            closest = enemies[i];
-            closestDistance = distance;
-          }
-        }
-        
-        // Calculate direction to the closest enemy
-        const dx = closest.x - player.x;
-        const dy = closest.y - player.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const normalizedDirection = {
-          x: dx / distance,
-          y: dy / distance
-        };
-        
-        projectiles.push({
-          id: `proj-${weapon.id}-${now}`,
           x: player.x + player.width / 2 - (weapon.projectileSize || 12) / 2,
           y: player.y + player.height / 2 - (weapon.projectileSize || 12) / 2,
           width: weapon.projectileSize || 12,
           height: weapon.projectileSize || 12,
-          speed: weapon.projectileSpeed || 350,
+          speed: weapon.projectileSpeed || 420,
           damage: weapon.damage,
-          direction: normalizedDirection,
+          direction: pd,
           weaponType: weapon.type,
-          duration: 2000,
+          duration: 1600,
           createdAt: now,
-          passthrough: weapon.passthrough || false,
+          passthrough: weapon.passthrough || weapon.level >= 5,
           hitEnemies: [],
           hostile: false,
           reflected: false
         });
       }
       break;
-    
-    case 'whip':
-      // Whip creates an area of effect attack in front of the player
-      let whipDirection = { x: 0, y: -1 }; // Default up
-      
-      if (player.lastDirection) {
-        // Use last swipe direction if available
-        whipDirection = { ...player.lastDirection };
-      } else if (player.direction !== 'idle') {
-        // Otherwise use the direction the player is moving
-        if (player.direction === 'right') whipDirection = { x: 1, y: 0 };
-        else if (player.direction === 'left') whipDirection = { x: -1, y: 0 };
-        else if (player.direction === 'down') whipDirection = { x: 0, y: 1 };
-        else if (player.direction === 'up') whipDirection = { x: 0, y: -1 };
-      }
-      
-      const whipArea = weapon.area || 100;
-      
-      projectiles.push({
-        id: `proj-${weapon.id}-${now}`,
-        x: player.x + player.width / 2 + whipDirection.x * player.width / 2,
-        y: player.y + player.height / 2 + whipDirection.y * player.height / 2,
-        width: whipArea,
-        height: whipArea,
-        speed: 0, // Doesn't move
-        damage: weapon.damage,
-        direction: whipDirection,
-        weaponType: weapon.type,
-        duration: weapon.duration || 300,
-        createdAt: now,
-        passthrough: true,
-        hitEnemies: [],
-        hostile: false,
-        reflected: false
-      });
-      break;
-    
-    case 'bible':
-      // Bible creates orbiting projectiles around the player
-      const bibleCount = weapon.level + 1; // Number of orbiting projectiles
-      const radius = 60; // Distance from player
-      
-      for (let i = 0; i < bibleCount; i++) {
-        const angle = (i / bibleCount) * Math.PI * 2 + now / 1000; // Rotate over time
-        
+    }
+
+    case 'axe': {
+      // Axes arc upward off the player. Each fire spawns level+2 of them
+      // with random upward velocities — VS feel without simulating gravity.
+      const count = 2 + weapon.level;
+      for (let i = 0; i < count; i++) {
+        const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.6;
+        const dir = { x: Math.cos(angle), y: Math.sin(angle) };
         projectiles.push({
           id: `proj-${weapon.id}-${now}-${i}`,
-          x: player.x + player.width / 2 + Math.cos(angle) * radius - (weapon.projectileSize || 16) / 2,
-          y: player.y + player.height / 2 + Math.sin(angle) * radius - (weapon.projectileSize || 16) / 2,
-          width: weapon.projectileSize || 16,
-          height: weapon.projectileSize || 16,
-          speed: 0, // Doesn't move independently, moves with player
+          x: player.x + player.width / 2 - (weapon.projectileSize || 22) / 2,
+          y: player.y + player.height / 2 - (weapon.projectileSize || 22) / 2,
+          width: weapon.projectileSize || 22,
+          height: weapon.projectileSize || 22,
+          speed: weapon.projectileSpeed || 280,
           damage: weapon.damage,
-          direction: { x: 0, y: 0 },
+          direction: dir,
           weaponType: weapon.type,
-          duration: 500, // Short duration, will be recreated continuously
+          duration: 2200,
           createdAt: now,
           passthrough: true,
           hitEnemies: [],
@@ -277,20 +165,139 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
         });
       }
       break;
+    }
 
-    case 'garlic':
-      // Garlic creates an aura around the player
+    case 'wand': {
+      // Auto-target nearest enemy (within a generous range).
+      if (enemies.length === 0) break;
+      let closest: Enemy | null = null;
+      let closestD2 = Infinity;
+      for (const e of enemies) {
+        const dx = e.x - player.x;
+        const dy = e.y - player.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < closestD2) {
+          closestD2 = d2;
+          closest = e;
+        }
+      }
+      if (!closest) break;
+
+      const dx = closest.x - player.x;
+      const dy = closest.y - player.y;
+      const dist = Math.max(0.001, Math.sqrt(dx * dx + dy * dy));
+      const dir = { x: dx / dist, y: dy / dist };
+
+      const shots = 1 + Math.floor(weapon.level / 2);
+      for (let i = 0; i < shots; i++) {
+        const angle = (i - (shots - 1) / 2) * 0.18;
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        projectiles.push({
+          id: `proj-${weapon.id}-${now}-${i}`,
+          x: player.x + player.width / 2 - (weapon.projectileSize || 12) / 2,
+          y: player.y + player.height / 2 - (weapon.projectileSize || 12) / 2,
+          width: weapon.projectileSize || 12,
+          height: weapon.projectileSize || 12,
+          speed: weapon.projectileSpeed || 360,
+          damage: weapon.damage,
+          direction: { x: dir.x * c - dir.y * s, y: dir.x * s + dir.y * c },
+          weaponType: weapon.type,
+          duration: 1600,
+          createdAt: now,
+          passthrough: weapon.level >= 5,
+          hitEnemies: [],
+          hostile: false,
+          reflected: false
+        });
+      }
+      break;
+    }
+
+    case 'whip': {
+      // Classic Antonio whip: a horizontal AoE slab that flips left/right
+      // each fire. Higher levels add a second slab on the same tick.
+      const facingRight = player.lastDirection
+        ? player.lastDirection.x >= 0
+        : player.direction !== 'left';
+      whipSwingLeft = !whipSwingLeft;
+      const area = (weapon.area || 130) + 20 * (weapon.level - 1);
+      const slashHeight = 60 + 6 * (weapon.level - 1);
+      const buildSlash = (left: boolean) => {
+        const px = player.x + player.width / 2;
+        const py = player.y + player.height / 2;
+        return {
+          id: `proj-${weapon.id}-${now}-${left ? 'L' : 'R'}`,
+          x: left ? px - area : px,
+          y: py - slashHeight / 2,
+          width: area,
+          height: slashHeight,
+          speed: 0,
+          damage: weapon.damage,
+          direction: { x: left ? -1 : 1, y: 0 },
+          weaponType: weapon.type,
+          duration: weapon.duration || 220,
+          createdAt: now,
+          passthrough: true,
+          hitEnemies: [],
+          hostile: false,
+          reflected: false
+        };
+      };
+
+      // Level 1 → one slash, alternating sides. Level 4+ → both sides at once.
+      if (weapon.level >= 4) {
+        projectiles.push(buildSlash(true));
+        projectiles.push(buildSlash(false));
+      } else {
+        projectiles.push(buildSlash(facingRight ? whipSwingLeft : !whipSwingLeft));
+      }
+      break;
+    }
+
+    case 'bible': {
+      // Orbiting books — visualized by recreating positions every fire.
+      const count = 2 + weapon.level;
+      const radius = 70 + 4 * weapon.level;
+      const size = weapon.projectileSize || 18;
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2 + now / 600;
+        projectiles.push({
+          id: `proj-${weapon.id}-${now}-${i}`,
+          x: player.x + player.width / 2 + Math.cos(angle) * radius - size / 2,
+          y: player.y + player.height / 2 + Math.sin(angle) * radius - size / 2,
+          width: size,
+          height: size,
+          speed: 0,
+          damage: weapon.damage,
+          direction: { x: 0, y: 0 },
+          weaponType: weapon.type,
+          duration: 500,
+          createdAt: now,
+          passthrough: true,
+          hitEnemies: [],
+          hostile: false,
+          reflected: false
+        });
+      }
+      break;
+    }
+
+    case 'garlic': {
+      // Aura around the player. Tick fires every cooldown; the projectile
+      // lifetime exceeds the cooldown so coverage stays continuous.
+      const area = (weapon.area || 110) + 12 * (weapon.level - 1);
       projectiles.push({
         id: `proj-${weapon.id}-${now}`,
-        x: player.x + player.width / 2 - (weapon.area || 100) / 2,
-        y: player.y + player.height / 2 - (weapon.area || 100) / 2,
-        width: weapon.area || 100,
-        height: weapon.area || 100,
-        speed: 0, // Doesn't move, follows player
+        x: player.x + player.width / 2 - area / 2,
+        y: player.y + player.height / 2 - area / 2,
+        width: area,
+        height: area,
+        speed: 0,
         damage: weapon.damage,
         direction: { x: 0, y: 0 },
         weaponType: weapon.type,
-        duration: 1000, // Continuous damage
+        duration: weapon.cooldown + 60,
         createdAt: now,
         passthrough: true,
         hitEnemies: [],
@@ -298,22 +305,22 @@ export const fireWeapon = (weapon: Weapon, player: Player, enemies: Enemy[]): Pr
         reflected: false
       });
       break;
+    }
   }
-  
-  // Update weapon's last fired time
+
+  // Bookkeeping: record lastFired so the cooldown gate works next tick.
   useGameStore.setState(state => ({
     player: {
       ...state.player,
-      weapons: state.player.weapons.map(w => 
+      weapons: state.player.weapons.map(w =>
         w.id === weapon.id ? { ...w, lastFired: now } : w
       )
     }
   }));
-  
+
   return projectiles;
 };
 
-// Get weapon display name
 export const getWeaponDisplayName = (type: WeaponType): string => {
   switch (type) {
     case 'knife': return '投げナイフ';
@@ -322,44 +329,39 @@ export const getWeaponDisplayName = (type: WeaponType): string => {
     case 'whip': return '鞭';
     case 'bible': return '聖書';
     case 'garlic': return 'ニンニク';
-    default: return '不明な武器';
+    default: return '不明';
   }
 };
 
-// Get weapon description
 export const getWeaponDescription = (type: WeaponType, level: number): string => {
   switch (type) {
     case 'knife':
-      return level === 1 
-        ? '直線的に飛ぶ基本的な投げナイフ' 
-        : `レベル${level}のナイフ - ダメージと速度が向上`;
-    
+      return level === 1
+        ? '前方に直線的に飛ぶナイフ'
+        : `Lv${level} - 発射数と貫通が向上`;
     case 'axe':
-      return level === 1 
-        ? '複数の敵にヒットできる回転斧' 
-        : `レベル${level}の斧 - サイズとダメージが向上`;
-    
+      return level === 1
+        ? '上方向に複数の斧を放つ'
+        : `Lv${level} - 発射数とダメージが向上`;
     case 'wand':
-      return level === 1 
-        ? '最も近い敵を狙う魔法の杖' 
-        : `レベル${level}の杖 - 攻撃速度とダメージが向上`;
-    
+      return level === 1
+        ? '最も近い敵を自動追尾する魔法弾'
+        : `Lv${level} - 弾数と貫通が向上`;
     case 'whip':
-      return level === 1 
-        ? '前方の敵にダメージを与える鞭' 
-        : `レベル${level}の鞭 - 範囲とダメージが向上`;
-    
+      return level === 1
+        ? '左右に交互に振るう鞭'
+        : level >= 4
+          ? `Lv${level} - 左右同時に振るう`
+          : `Lv${level} - 範囲とダメージが向上`;
     case 'bible':
-      return level === 1 
-        ? '周囲を回転し、敵にダメージを与える聖書' 
-        : `レベル${level}の聖書 - ${level + 1}個の軌道を描く`;
-    
+      return level === 1
+        ? '自分の周りを回転する聖書'
+        : `Lv${level} - ${2 + level}冊が周回する`;
     case 'garlic':
-      return level === 1 
-        ? '周囲にダメージを与えるオーラを作り出す' 
-        : `レベル${level}のニンニク - 範囲とダメージが向上`;
-    
+      return level === 1
+        ? '周囲の敵を継続的に焼くオーラ'
+        : `Lv${level} - 範囲とダメージが向上`;
     default:
-      return '不明な武器';
+      return '不明';
   }
 };

@@ -1,208 +1,168 @@
 import { Enemy, EnemyType, GameBounds, Player, Projectile } from '../types/game';
 
-// Generate a random enemy outside the visible area
-export const generateEnemy = (
-  gameTime: number, 
-  player: Player, 
-  gameBounds: GameBounds
+// Mad-Forest port: a stat sheet per enemy type. Difficulty multiplier scales
+// the base values over time so a 25-minute zombie has more HP than a 1-minute
+// zombie, mirroring how VS ramps. Spawn weights for each type live in the
+// stage director (selectEnemyType) below.
+interface EnemyStats {
+  width: number;
+  height: number;
+  speed: number;       // px/s at base difficulty
+  health: number;
+  damage: number;
+  experienceValue: number;
+}
+
+const ENEMY_STATS: Record<EnemyType, EnemyStats> = {
+  bat:       { width: 22, height: 22, speed: 75,  health: 8,    damage: 6,   experienceValue: 1 },
+  skeleton:  { width: 26, height: 26, speed: 60,  health: 18,   damage: 8,   experienceValue: 1 },
+  zombie:    { width: 30, height: 30, speed: 42,  health: 40,   damage: 10,  experienceValue: 2 },
+  plant:     { width: 28, height: 28, speed: 8,   health: 25,   damage: 0,   experienceValue: 2 },
+  ghost:     { width: 24, height: 24, speed: 90,  health: 14,   damage: 5,   experienceValue: 1 },
+  werewolf:  { width: 30, height: 30, speed: 105, health: 32,   damage: 12,  experienceValue: 3 },
+  pumpkin:   { width: 40, height: 40, speed: 55,  health: 150,  damage: 16,  experienceValue: 8 },
+  giantbat:  { width: 60, height: 60, speed: 70,  health: 500,  damage: 22,  experienceValue: 30 },
+  reaper:    { width: 80, height: 80, speed: 130, health: 99999,damage: 999, experienceValue: 0 }
+};
+
+// Stage director: which enemy types are eligible at this gameTime, and how
+// likely each is to be picked. Modeled after Mad Forest's gentle ramp.
+interface EnemyWeight { type: EnemyType; weight: number; }
+
+const selectEnemyType = (gameTime: number): EnemyType => {
+  const t = gameTime;
+  const pool: EnemyWeight[] = [];
+
+  // 0:00-0:30 — only bats
+  pool.push({ type: 'bat', weight: 100 });
+
+  if (t >= 30000)  pool.push({ type: 'skeleton', weight: 60 });
+  if (t >= 90000)  pool.push({ type: 'zombie',   weight: 40 });
+  if (t >= 120000) pool.push({ type: 'plant',    weight: 12 });
+  if (t >= 180000) pool.push({ type: 'ghost',    weight: 50 });
+  if (t >= 360000) pool.push({ type: 'werewolf', weight: 45 });
+
+  // Past 8 min the early enemies thin out so later types dominate; tweak the
+  // bat weight downward so the field doesn't stay swarmy forever.
+  if (t >= 480000) pool[0].weight = 30;
+  if (t >= 900000) pool[0].weight = 12; // 15 min onward, bats are rare
+
+  const total = pool.reduce((s, p) => s + p.weight, 0);
+  let r = Math.random() * total;
+  for (const entry of pool) {
+    r -= entry.weight;
+    if (r <= 0) return entry.type;
+  }
+  return pool[pool.length - 1].type;
+};
+
+// Compute a difficulty multiplier capped at 5×. Same shape as the legacy
+// code; HP and damage scale with it, base speed does not (VS keeps enemy
+// speed mostly constant, only the spawn pressure increases).
+const difficultyFor = (gameTime: number) => Math.min(1 + gameTime / 90000, 5);
+
+const buildEnemy = (
+  type: EnemyType,
+  x: number,
+  y: number,
+  gameTime: number
 ): Enemy => {
-  // Increase difficulty based on game time
-  const difficulty = Math.min(1 + gameTime / 60000, 5);
-  
-  // Determine spawn position outside the visible area
-  const spawnSide = Math.floor(Math.random() * 4); // 0: top, 1: right, 2: bottom, 3: left
-  let x = 0;
-  let y = 0;
-  const buffer = 50; // Distance outside the visible area
-  
-  // Get the camera-aware spawn position
-  // We'll spawn enemies relative to the player's position rather than the viewport
+  const stats = ENEMY_STATS[type];
+  const diff = difficultyFor(gameTime);
+  // Reaper is a fixed terminal entity — don't scale it.
+  const hpMult = type === 'reaper' ? 1 : diff;
+  const dmgMult = type === 'reaper' ? 1 : Math.min(diff, 2.5);
+
+  return {
+    id: `enemy-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    x,
+    y,
+    width: stats.width,
+    height: stats.height,
+    speed: stats.speed,
+    health: stats.health * hpMult,
+    maxHealth: stats.health * hpMult,
+    damage: Math.round(stats.damage * dmgMult),
+    type,
+    experienceValue: stats.experienceValue,
+    lastHit: 0,
+    lastShot: Date.now() - Math.random() * 1500
+  };
+};
+
+// Generate a single enemy at a random point outside the camera viewport but
+// close enough that it will plausibly reach the player. Used by both the
+// continuous spawner and the wave/elite spawner.
+export const generateEnemy = (
+  gameTime: number,
+  player: Player,
+  gameBounds: GameBounds,
+  forcedType?: EnemyType
+): Enemy => {
+  const type = forcedType ?? selectEnemyType(gameTime);
+  const buffer = 50;
   const viewportWidth = gameBounds.width;
   const viewportHeight = gameBounds.height;
-  
-  // Spawn outside the player's view but within the game world
+
+  const spawnSide = Math.floor(Math.random() * 4);
+  let x = 0;
+  let y = 0;
   switch (spawnSide) {
-    case 0: // Top
+    case 0:
       x = player.x - viewportWidth / 4 - buffer + Math.random() * (viewportWidth / 2 + buffer * 2);
       y = player.y - viewportHeight / 4 - buffer;
       break;
-    case 1: // Right
+    case 1:
       x = player.x + viewportWidth / 4 + buffer;
       y = player.y - viewportHeight / 4 - buffer + Math.random() * (viewportHeight / 2 + buffer * 2);
       break;
-    case 2: // Bottom
+    case 2:
       x = player.x - viewportWidth / 4 - buffer + Math.random() * (viewportWidth / 2 + buffer * 2);
       y = player.y + viewportHeight / 4 + buffer;
       break;
-    case 3: // Left
+    case 3:
       x = player.x - viewportWidth / 4 - buffer;
       y = player.y - viewportHeight / 4 - buffer + Math.random() * (viewportHeight / 2 + buffer * 2);
       break;
   }
-  
-  // Keep enemies within the game bounds
-  x = Math.max(0, Math.min(gameBounds.width * 1.5 - 32, x));
-  y = Math.max(0, Math.min(gameBounds.height * 1.5 - 32, y));
-  
-  // Determine enemy type based on game time
-  const enemyTypes: EnemyType[] = ['basic'];
-  
-  if (gameTime > 30000) enemyTypes.push('fast');
-  if (gameTime > 60000) enemyTypes.push('tank');
-  if (gameTime > 120000) enemyTypes.push('ranged');
-  if (gameTime > 300000 && Math.random() < 0.05) enemyTypes.push('boss');
-  
-  const type = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
-  
-  // Create enemy based on type
-  switch (type) {
-    case 'basic':
-      return {
-        id: `enemy-${Date.now()}-${Math.random()}`,
-        x,
-        y,
-        width: 24,
-        height: 24,
-        speed: 80 * difficulty,
-        health: 20 * difficulty,
-        maxHealth: 20 * difficulty,
-        damage: 10,
-        type: 'basic',
-        experienceValue: 1,
-        lastHit: 0,
-        lastShot: Date.now() - Math.random() * 1500
-      };
-
-    case 'fast':
-      return {
-        id: `enemy-${Date.now()}-${Math.random()}`,
-        x,
-        y,
-        width: 20,
-        height: 20,
-        speed: 60 * difficulty, // Reduced from 90 to 60
-        health: 15 * difficulty,
-        maxHealth: 15 * difficulty,
-        damage: 5,
-        type: 'fast',
-        experienceValue: 2,
-        lastHit: 0,
-        lastShot: Date.now() - Math.random() * 1500
-      };
-    
-    case 'tank':
-      return {
-        id: `enemy-${Date.now()}-${Math.random()}`,
-        x,
-        y,
-        width: 32,
-        height: 32,
-        speed: 50 * difficulty,
-        health: 50 * difficulty,
-        maxHealth: 50 * difficulty,
-        damage: 15,
-        type: 'tank',
-        experienceValue: 5,
-        lastHit: 0,
-        lastShot: Date.now() - Math.random() * 1500
-      };
-    
-    case 'ranged':
-      return {
-        id: `enemy-${Date.now()}-${Math.random()}`,
-        x,
-        y,
-        width: 22,
-        height: 22,
-        speed: 70 * difficulty,
-        health: 25 * difficulty,
-        maxHealth: 25 * difficulty,
-        damage: 8,
-        type: 'ranged',
-        experienceValue: 3,
-        lastHit: 0,
-        lastShot: Date.now() - Math.random() * 1500
-      };
-    
-    case 'boss':
-      return {
-        id: `enemy-${Date.now()}-${Math.random()}`,
-        x,
-        y,
-        width: 48,
-        height: 48,
-        speed: 40 * difficulty,
-        health: 200 * difficulty,
-        maxHealth: 200 * difficulty,
-        damage: 25,
-        type: 'boss',
-        experienceValue: 20,
-        lastHit: 0,
-        lastShot: Date.now() - Math.random() * 1500
-      };
-    
-    default:
-      return {
-        id: `enemy-${Date.now()}-${Math.random()}`,
-        x,
-        y,
-        width: 24,
-        height: 24,
-        speed: 80 * difficulty,
-        health: 20 * difficulty,
-        maxHealth: 20 * difficulty,
-        damage: 10,
-        type: 'basic',
-        experienceValue: 1,
-        lastHit: 0,
-        lastShot: Date.now() - Math.random() * 1500
-      };
-  }
+  return buildEnemy(type, x, y, gameTime);
 };
 
-// Configuration for enemy attacks. Every enemy type fires now, but the
-// dedicated `ranged` and `boss` types fire much more often.
+// Spawn an enemy at a specific world position (used for Reaper, scripted
+// elites, and horde lines).
+export const spawnEnemyAt = (
+  type: EnemyType,
+  x: number,
+  y: number,
+  gameTime: number
+): Enemy => buildEnemy(type, x, y, gameTime);
+
+// Hostile projectile profiles. In the Mad Forest port only `plant` shoots —
+// everything else is pure melee. Plants spit seeds toward the player on a
+// generous cadence so the counter has real targets to time off of.
 export const ENEMY_PROJECTILE_DURATION = 4000;
 
-// Per-type fire profile. `range` is squared distance budget — enemies
-// only fire when the player is at least this close. Returns `null` for
-// enemies that should never fire.
 interface FireProfile {
-  interval: number; // ms between shots
-  range: number;    // px max distance to player
+  interval: number;
+  range: number;
   speed: number;
   damage: number;
   size: number;
 }
 
 export const getEnemyFireProfile = (enemy: Enemy): FireProfile | null => {
-  switch (enemy.type) {
-    case 'basic':
-      return { interval: 4500, range: 320, speed: 180, damage: 6, size: 12 };
-    case 'fast':
-      return { interval: 3200, range: 300, speed: 260, damage: 5, size: 10 };
-    case 'tank':
-      return { interval: 5000, range: 280, speed: 160, damage: 12, size: 16 };
-    case 'ranged':
-      return { interval: 1800, range: 400, speed: 240, damage: 8, size: 14 };
-    case 'boss':
-      return { interval: 1200, range: 480, speed: 260, damage: 18, size: 18 };
-    default:
-      return null;
+  if (enemy.type === 'plant') {
+    return { interval: 2200, range: 380, speed: 230, damage: 7, size: 12 };
   }
+  return null;
 };
 
-// Create a hostile projectile fired by an enemy toward the player.
 export const createEnemyProjectile = (
   enemy: Enemy,
   player: Player
 ): Projectile => {
   const profile = getEnemyFireProfile(enemy) ?? {
-    speed: 200,
-    damage: 6,
-    size: 12,
-    interval: 0,
-    range: 0
+    speed: 200, damage: 6, size: 12, interval: 0, range: 0
   };
   const ex = enemy.x + enemy.width / 2;
   const ey = enemy.y + enemy.height / 2;
@@ -233,36 +193,32 @@ export const createEnemyProjectile = (
   };
 };
 
-// Get enemy color based on type
+// Color palette per type. Used by the renderer for the body fill.
 export const getEnemyColor = (type: EnemyType): string => {
   switch (type) {
-    case 'basic': return '#DC2626'; // Red
-    case 'fast': return '#F97316'; // Orange
-    case 'tank': return '#7C3AED'; // Purple
-    case 'ranged': return '#10B981'; // Green
-    case 'boss': return '#F59E0B'; // Amber
-    default: return '#DC2626'; // Default red
+    case 'bat':      return '#1f1b2c';  // near-black purple
+    case 'skeleton': return '#e7e3d3';  // bone white
+    case 'zombie':   return '#5a7a3c';  // sickly green
+    case 'plant':    return '#7e2a86';  // pink-purple
+    case 'ghost':    return '#cbd5e1';  // pale blue-white
+    case 'werewolf': return '#6b3f1d';  // dark brown
+    case 'pumpkin':  return '#f97316';  // orange
+    case 'giantbat': return '#11122c';  // very dark
+    case 'reaper':   return '#0a0a0a';  // pitch black
+    default:         return '#dc2626';
   }
 };
 
-// Determine number of enemies to spawn based on game time
-export const getEnemySpawnCount = (gameTime: number): number => {
-  // Base spawn rate increases over time
-  const baseCount = 1 + Math.floor(gameTime / 30000);
-  
-  // Add randomness
-  const randomFactor = Math.random() * 2;
-  
-  return Math.floor(baseCount + randomFactor);
+// Spawn cadence: starts gentle, ramps up fast. Matches VS's "you're never
+// alone for long after minute 2" feel.
+export const getEnemySpawnInterval = (gameTime: number): number => {
+  // 800ms at start → ~180ms by 12 minutes
+  const base = Math.max(180, 800 - gameTime / 1000);
+  return base + Math.random() * 120;
 };
 
-// Determine spawn interval based on game time
-export const getEnemySpawnInterval = (gameTime: number): number => {
-  // Start with 2 seconds, decrease to minimum of 0.5 seconds
-  const baseInterval = Math.max(500, 2000 - gameTime / 15000);
-  
-  // Add randomness
-  const randomFactor = Math.random() * 500;
-  
-  return baseInterval + randomFactor;
+export const getEnemySpawnCount = (gameTime: number): number => {
+  // 1 enemy per tick at start, ramps to 4-5 by 15 minutes
+  const base = 1 + Math.floor(gameTime / 180000);
+  return base + (Math.random() < 0.4 ? 1 : 0);
 };

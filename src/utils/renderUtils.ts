@@ -1,5 +1,17 @@
 import { Player, Enemy, Projectile, Pickup, VisualEffect } from '../types/game';
 import { getEnemyColor } from './enemyUtils';
+import { drawSprite, preloadSprites } from './spriteLoader';
+
+// Kick off image loads as soon as the renderer module is imported. The
+// names map 1:1 to PNG filenames under `public/sprites/`.
+preloadSprites([
+  'player',
+  'bat', 'skeleton', 'zombie', 'plant', 'ghost', 'werewolf',
+  'pumpkin', 'giantbat', 'reaper',
+  'pickup-xp-blue', 'pickup-xp-green', 'pickup-xp-red',
+  'pickup-health', 'pickup-magnet', 'pickup-bomb', 'pickup-chest',
+  'tree'
+]);
 
 // Counter ring visualization. Visible only while the counter window is open
 // after a finger release; a successful reflect adds a brief gold flash.
@@ -245,6 +257,8 @@ const hash2 = (x: number, y: number) => {
 };
 
 const drawTree = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  // Sprite-first
+  if (drawSprite(ctx, 'tree', x - 24, y - 32, 48, 64)) return;
   // Trunk
   ctx.fillStyle = '#3b2410';
   ctx.fillRect(x - 4, y, 8, 16);
@@ -272,20 +286,32 @@ const drawPlayer = (
     ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 50);
   }
 
-  // Cape / body
-  ctx.fillStyle = '#3a2a55';
-  ctx.beginPath();
-  ctx.arc(cx, cy + 2, player.width / 2, 0, Math.PI * 2);
-  ctx.fill();
-  // Head
-  ctx.fillStyle = '#e9d5b3';
-  ctx.beginPath();
-  ctx.arc(cx, cy - 4, player.width / 3.2, 0, Math.PI * 2);
-  ctx.fill();
-  // Hat
-  ctx.fillStyle = '#1a1024';
-  ctx.fillRect(cx - 9, cy - 12, 18, 4);
-  ctx.fillRect(cx - 14, cy - 9, 28, 3);
+  // Sprite-first: if a player.png exists, draw it (flipped when facing
+  // left). Otherwise fall back to the procedural cape/head/hat figure.
+  const flipH = player.direction === 'left'
+    || (player.lastDirection && player.lastDirection.x < 0);
+  const drewSprite = drawSprite(
+    ctx, 'player',
+    player.x - camera.x, player.y - camera.y,
+    player.width, player.height,
+    !!flipH
+  );
+  if (!drewSprite) {
+    // Cape / body
+    ctx.fillStyle = '#3a2a55';
+    ctx.beginPath();
+    ctx.arc(cx, cy + 2, player.width / 2, 0, Math.PI * 2);
+    ctx.fill();
+    // Head
+    ctx.fillStyle = '#e9d5b3';
+    ctx.beginPath();
+    ctx.arc(cx, cy - 4, player.width / 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    // Hat
+    ctx.fillStyle = '#1a1024';
+    ctx.fillRect(cx - 9, cy - 12, 18, 4);
+    ctx.fillRect(cx - 14, cy - 9, 28, 3);
+  }
 
   ctx.globalAlpha = 1;
   drawCounterShield(ctx, player, camera);
@@ -359,6 +385,31 @@ const drawEnemy = (
 
   ctx.save();
   if (enemy.type === 'ghost') ctx.globalAlpha = 0.65;
+
+  // Sprite-first. If the file exists in public/sprites/{type}.png the
+  // renderer uses it and skips the procedural shape; otherwise we draw
+  // the hand-built fallback below.
+  const drewSprite = drawSprite(
+    ctx, enemy.type,
+    enemy.x - camera.x, enemy.y - camera.y,
+    w, h
+  );
+  if (drewSprite) {
+    ctx.restore();
+    drawHealthBar(ctx, enemy, camera);
+    if (enemy.type === 'pumpkin' || enemy.type === 'giantbat' || enemy.type === 'reaper') {
+      drawBossMarker(ctx, cx, enemy.y - camera.y - 6, enemy.type === 'reaper' ? '#ef4444' : '#fde68a');
+    }
+    if (Date.now() - enemy.lastHit < 90) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(w, h) / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    return;
+  }
 
   switch (enemy.type) {
     case 'bat': {
@@ -756,6 +807,17 @@ const drawPickup = (
   const size = 16;
   const floatOffset = Math.sin(Date.now() / 300 + pickup.x * 0.01) * 2;
   const drawY = cy + floatOffset;
+
+  // Sprite-first. XP gems pick the tier name from the value so the
+  // blue/green/red sprites get the right slot. Other pickup types use
+  // their direct name.
+  const spriteName =
+    pickup.type === 'experience'
+      ? (pickup.value >= 5 ? 'pickup-xp-red' : pickup.value >= 2 ? 'pickup-xp-green' : 'pickup-xp-blue')
+      : `pickup-${pickup.type}`;
+  if (drawSprite(ctx, spriteName, pickup.x - camera.x, pickup.y - camera.y + floatOffset, size, size)) {
+    return;
+  }
 
   switch (pickup.type) {
     case 'experience': {

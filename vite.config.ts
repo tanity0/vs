@@ -9,6 +9,10 @@ const pkg = JSON.parse(
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // Repo is served from https://tanity0.github.io/vs/ on GitHub Pages, so
+  // built assets must be referenced under /vs/ — without this, dist/index.html
+  // points at root-absolute /assets/... and the deployed site 404s silently.
+  base: '/vs/',
   plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),

@@ -42,7 +42,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ width, height }) => {
     
     const context = canvas.getContext('2d');
     if (!context) return;
-    
+
+    // Pixel art mode: disable smoothing once so every drawImage and primitive
+    // edge stays crisp. Setting this every frame is unnecessary — the flag
+    // sticks per-context.
+    context.imageSmoothingEnabled = false;
+
     // Clear the canvas
     context.clearRect(0, 0, width, height);
     

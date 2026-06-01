@@ -82,13 +82,73 @@ export const renderGame = (
   ctx.clearRect(0, 0, width, height);
   drawForestBackground(ctx, width, height, camera);
 
+  // Ground shadows for every gameplay entity, drawn before sprites so they
+  // ground each character in the scene without obscuring detail.
+  drawGroundShadow(
+    ctx,
+    player.x + player.width / 2 - camera.x,
+    player.y + player.height - camera.y - 2,
+    player.width
+  );
+  for (const enemy of enemies) {
+    if (enemy.type === 'ghost') continue; // ghosts hover; no shadow
+    const heavy = enemy.type === 'reaper' || enemy.type === 'giantbat' || enemy.type === 'pumpkin';
+    drawGroundShadow(
+      ctx,
+      enemy.x + enemy.width / 2 - camera.x,
+      enemy.y + enemy.height - camera.y - 2,
+      enemy.width * (heavy ? 1.15 : 1),
+      heavy ? 0.5 : 0.4
+    );
+  }
+
+  // Warm player light halo (and a smaller one per boss). Drawn over the
+  // ground but under the sprites so the lit character still reads clearly.
+  drawLightHalo(
+    ctx,
+    player.x + player.width / 2 - camera.x,
+    player.y + player.height / 2 - camera.y,
+    90,
+    'rgba(253, 224, 128, 0.55)',
+    0.6
+  );
+  for (const enemy of enemies) {
+    if (enemy.type === 'reaper') {
+      drawLightHalo(
+        ctx,
+        enemy.x + enemy.width / 2 - camera.x,
+        enemy.y + enemy.height / 2 - camera.y,
+        100,
+        'rgba(220, 38, 38, 0.6)',
+        0.7
+      );
+    } else if (enemy.type === 'giantbat' || enemy.type === 'pumpkin') {
+      drawLightHalo(
+        ctx,
+        enemy.x + enemy.width / 2 - camera.x,
+        enemy.y + enemy.height / 2 - camera.y,
+        60,
+        'rgba(251, 191, 36, 0.45)',
+        0.5
+      );
+    }
+  }
+
   // World-space effects under sprites (trails)
   effects.forEach(e => {
     if (e.kind === 'trail') drawTrailEffect(ctx, e, camera);
   });
 
   pickups.forEach(pickup => drawPickup(ctx, pickup, camera));
-  enemies.forEach(enemy => drawEnemy(ctx, enemy, camera));
+
+  // Y-sort enemies so southerly (higher-y) enemies render on top of
+  // northerly ones. Without this, sprites of overlapping enemies pop in
+  // arbitrary order and depth reads wrong.
+  const sortedEnemies = [...enemies].sort(
+    (a, b) => (a.y + a.height) - (b.y + b.height)
+  );
+  sortedEnemies.forEach(enemy => drawEnemy(ctx, enemy, camera));
+
   projectiles.forEach(projectile => drawProjectile(ctx, projectile, camera));
   drawPlayer(ctx, player, camera);
 
@@ -98,6 +158,28 @@ export const renderGame = (
     else if (e.kind === 'ring') drawRingEffect(ctx, e, camera);
     else if (e.kind === 'damageNumber') drawDamageNumberEffect(ctx, e, camera);
   });
+
+  // Ambient atmosphere layer: drifting fireflies + dust. Persistent and
+  // independent of the gameplay-event effects queue.
+  drawAmbientParticles(ctx, width, height, camera);
+
+  // Warm color grade + stronger vignette to unify the scene.
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = 'rgba(255, 214, 138, 0.92)';
+  ctx.globalAlpha = 0.18;
+  ctx.fillRect(0, 0, width, height);
+  ctx.restore();
+
+  const vg = ctx.createRadialGradient(
+    width / 2, height / 2, 0,
+    width / 2, height / 2, Math.max(width, height) * 0.72
+  );
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(0.6, 'rgba(0,0,0,0.15)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.65)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, width, height);
 
   // Screen-space flashes overlay everything
   effects.forEach(e => {
@@ -192,9 +274,18 @@ const drawFlashEffect = (
   ctx.restore();
 };
 
-// Mad Forest backdrop. We paint a green ground, then a grid of darker
-// patches and a sparse field of "tree" circles whose positions are derived
-// from world coordinates so they stay anchored as the camera moves.
+// Deterministic 2D hash → [0,1). Used for all background detail placement so
+// the forest stays anchored to world coordinates as the camera pans.
+const hash2 = (x: number, y: number) => {
+  const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+};
+
+// Mad Forest backdrop — denser, layered detail to push the look toward
+// Octopath-style pixel art density. Two grids run in parallel:
+//   - 32px grass-color grid (dark/mid/light tinted cells)
+//   - 32px detail-prop grid (flowers, mushrooms, stones, grass tufts)
+// A coarser tree grid sits on top.
 const drawForestBackground = (
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -205,28 +296,51 @@ const drawForestBackground = (
   ctx.fillStyle = '#1b3a18';
   ctx.fillRect(0, 0, width, height);
 
-  // Darker grass clumps — every 64px world cell gets a chance, hashed from
-  // its world coords so the pattern is deterministic per location.
-  const cell = 64;
+  const cell = 32;
   const startX = Math.floor(camera.x / cell) * cell;
   const startY = Math.floor(camera.y / cell) * cell;
   const endX = startX + width + cell;
   const endY = startY + height + cell;
+
+  // Pass 1: cell-fill tints. Sparser than before — only ~22% of cells get a
+  // tinted fill so the eye notices each patch instead of seeing a busy
+  // checkerboard.
   for (let wx = startX; wx <= endX; wx += cell) {
     for (let wy = startY; wy <= endY; wy += cell) {
       const h = hash2(wx, wy);
-      if (h < 0.18) {
-        ctx.fillStyle = '#172e15';
+      if (h < 0.12) {
+        ctx.fillStyle = '#142a11';
         ctx.fillRect(wx - camera.x, wy - camera.y, cell, cell);
-      } else if (h < 0.28) {
-        ctx.fillStyle = '#214a1f';
+      } else if (h < 0.22) {
+        ctx.fillStyle = '#234d20';
         ctx.fillRect(wx - camera.x, wy - camera.y, cell, cell);
       }
     }
   }
 
-  // Trees: a much coarser grid (200px), with occasional triplets per cell.
-  const tcell = 200;
+  // Pass 2: detail props. Each cell rolls a separate hash; the result picks
+  // among grass tuft / flower / mushroom / stone or nothing.
+  for (let wx = startX; wx <= endX; wx += cell) {
+    for (let wy = startY; wy <= endY; wy += cell) {
+      const d = hash2(wx + 31, wy + 17);
+      if (d >= 0.32) continue; // ~68% of cells stay empty
+      // Sub-cell position so props don't all sit on the grid lines.
+      const px = wx + 6 + Math.floor(hash2(wx + 1, wy + 2) * (cell - 12)) - camera.x;
+      const py = wy + 6 + Math.floor(hash2(wx + 3, wy + 5) * (cell - 12)) - camera.y;
+      if (d < 0.16) {
+        drawGrassTuft(ctx, px, py);
+      } else if (d < 0.22) {
+        drawFlower(ctx, px, py, hash2(wx + 7, wy + 11));
+      } else if (d < 0.27) {
+        drawMushroom(ctx, px, py);
+      } else {
+        drawSmallStone(ctx, px, py);
+      }
+    }
+  }
+
+  // Trees: coarser grid so they stay sparse and readable.
+  const tcell = 220;
   const tStartX = Math.floor((camera.x - tcell) / tcell) * tcell;
   const tStartY = Math.floor((camera.y - tcell) / tcell) * tcell;
   const tEndX = tStartX + width + tcell * 2;
@@ -237,41 +351,238 @@ const drawForestBackground = (
       if (h < 0.35) {
         const ox = (hash2(wx, wy + 1) - 0.5) * tcell;
         const oy = (hash2(wx + 1, wy) - 0.5) * tcell;
-        drawTree(ctx, wx + tcell / 2 + ox - camera.x, wy + tcell / 2 + oy - camera.y);
+        const sizeRoll = hash2(wx + 5, wy + 23);
+        drawTree(
+          ctx,
+          wx + tcell / 2 + ox - camera.x,
+          wy + tcell / 2 + oy - camera.y,
+          0.85 + sizeRoll * 0.4
+        );
       }
     }
   }
-
-  // Subtle vignette
-  const vg = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.max(width, height) * 0.7);
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.45)');
-  ctx.fillStyle = vg;
-  ctx.fillRect(0, 0, width, height);
 };
 
-// Deterministic 2D hash → [0,1)
-const hash2 = (x: number, y: number) => {
-  const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-  return v - Math.floor(v);
+const drawGrassTuft = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  ctx.fillStyle = '#3a7a32';
+  ctx.fillRect(x, y, 1, 3);
+  ctx.fillRect(x + 2, y + 1, 1, 2);
+  ctx.fillRect(x - 2, y + 1, 1, 2);
 };
 
-const drawTree = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+const drawFlower = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  colorRoll: number
+) => {
+  const palette = ['#f87171', '#fbbf24', '#a5b4fc', '#f9a8d4'];
+  const color = palette[Math.floor(colorRoll * palette.length)];
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, 2, 2);
+  ctx.fillStyle = '#fef3c7';
+  ctx.fillRect(x, y, 1, 1);
+  ctx.fillStyle = '#2a5a25';
+  ctx.fillRect(x + 1, y + 2, 1, 2);
+};
+
+const drawMushroom = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  // Stem
+  ctx.fillStyle = '#fef3c7';
+  ctx.fillRect(x + 1, y + 2, 2, 2);
+  // Cap
+  ctx.fillStyle = '#b91c1c';
+  ctx.fillRect(x, y, 4, 2);
+  // Spots
+  ctx.fillStyle = '#fef9c3';
+  ctx.fillRect(x + 1, y, 1, 1);
+};
+
+const drawSmallStone = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  ctx.fillStyle = '#454f53';
+  ctx.fillRect(x, y + 1, 4, 2);
+  ctx.fillStyle = '#5e6a70';
+  ctx.fillRect(x + 1, y, 2, 1);
+};
+
+const drawTree = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale = 1
+) => {
   // Sprite-first
-  if (drawSprite(ctx, 'tree', x - 24, y - 32, 48, 64)) return;
-  // Trunk
-  ctx.fillStyle = '#3b2410';
-  ctx.fillRect(x - 4, y, 8, 16);
-  // Canopy
+  if (drawSprite(ctx, 'tree', x - 24 * scale, y - 32 * scale, 48 * scale, 64 * scale)) {
+    return;
+  }
+  // Drop shadow on the ground
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 18 * scale, 18 * scale, 5 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // Trunk with shading
+  ctx.fillStyle = '#2a190b';
+  ctx.fillRect(x - 4 * scale, y, 8 * scale, 18 * scale);
+  ctx.fillStyle = '#4a2d14';
+  ctx.fillRect(x - 4 * scale, y, 3 * scale, 18 * scale);
+  // Canopy — three darker layers
   ctx.fillStyle = '#0c2a0c';
   ctx.beginPath();
-  ctx.arc(x, y - 6, 22, 0, Math.PI * 2);
+  ctx.arc(x, y - 6 * scale, 22 * scale, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = '#143d14';
   ctx.beginPath();
-  ctx.arc(x - 8, y - 10, 12, 0, Math.PI * 2);
-  ctx.arc(x + 9, y - 8, 14, 0, Math.PI * 2);
+  ctx.arc(x - 8 * scale, y - 10 * scale, 12 * scale, 0, Math.PI * 2);
+  ctx.arc(x + 9 * scale, y - 8 * scale, 14 * scale, 0, Math.PI * 2);
   ctx.fill();
+  // Top-light highlight
+  ctx.fillStyle = '#2d6028';
+  ctx.beginPath();
+  ctx.arc(x - 4 * scale, y - 16 * scale, 6 * scale, 0, Math.PI * 2);
+  ctx.fill();
+};
+
+// Small flat elliptical drop shadow under entities. Anchored at the entity's
+// feet so vertical movement reads as actual depth.
+const drawGroundShadow = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  baseY: number,
+  width: number,
+  alpha = 0.4
+) => {
+  ctx.save();
+  ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+  ctx.beginPath();
+  ctx.ellipse(cx, baseY, width * 0.55, width * 0.18, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+};
+
+// Soft additive warm halo. Used for the player and (smaller) for bosses to
+// make them feel like light sources in the dark forest.
+const drawLightHalo = (
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  color: string,
+  intensity = 0.55
+) => {
+  const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  gradient.addColorStop(0, color);
+  gradient.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = intensity;
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+};
+
+// Ambient particle layer. A pool of fireflies + dust motes drifts persistently
+// around the camera viewport, completely separate from the gameplay-event
+// effects[] queue. Each particle's age is reset (and position re-randomized
+// near the camera) once its lifetime expires or it drifts far off-screen.
+type AmbientParticle = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  hue: 'firefly' | 'dust';
+  bornAt: number;
+  lifetime: number;
+};
+
+const AMBIENT_COUNT = 50;
+const ambientParticles: AmbientParticle[] = [];
+let lastAmbientTick = 0;
+
+const respawnAmbient = (
+  p: AmbientParticle,
+  camera: { x: number; y: number },
+  width: number,
+  height: number,
+  now: number
+) => {
+  // Spawn within a generous box around the camera so they're already in view
+  // (or just outside) when they appear.
+  p.x = camera.x - width * 0.1 + Math.random() * (width * 1.2);
+  p.y = camera.y - height * 0.1 + Math.random() * (height * 1.2);
+  p.hue = Math.random() < 0.45 ? 'firefly' : 'dust';
+  const drift = p.hue === 'firefly' ? 8 : 14;
+  p.vx = (Math.random() - 0.5) * drift;
+  p.vy = (Math.random() - 0.5) * drift - 4; // gentle upward bias
+  p.size = p.hue === 'firefly' ? 1.5 + Math.random() * 1.2 : 1 + Math.random() * 0.6;
+  p.bornAt = now;
+  p.lifetime = (p.hue === 'firefly' ? 5000 : 3500) + Math.random() * 2500;
+};
+
+const ensureAmbientPool = (
+  camera: { x: number; y: number },
+  width: number,
+  height: number,
+  now: number
+) => {
+  while (ambientParticles.length < AMBIENT_COUNT) {
+    const p: AmbientParticle = {
+      x: 0, y: 0, vx: 0, vy: 0, size: 1, hue: 'dust',
+      bornAt: now, lifetime: 0
+    };
+    respawnAmbient(p, camera, width, height, now);
+    // Stagger ages so the pool doesn't all fade together on first render.
+    p.bornAt -= Math.random() * p.lifetime;
+    ambientParticles.push(p);
+  }
+};
+
+const drawAmbientParticles = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  camera: { x: number; y: number }
+) => {
+  const now = Date.now();
+  ensureAmbientPool(camera, width, height, now);
+  const dt = lastAmbientTick === 0 ? 0 : Math.min(0.05, (now - lastAmbientTick) / 1000);
+  lastAmbientTick = now;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of ambientParticles) {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    const age = now - p.bornAt;
+    const t = age / p.lifetime;
+    // Far off-screen or expired → recycle.
+    const sx = p.x - camera.x;
+    const sy = p.y - camera.y;
+    if (t >= 1 || sx < -60 || sy < -60 || sx > width + 60 || sy > height + 60) {
+      respawnAmbient(p, camera, width, height, now);
+      continue;
+    }
+    // Fade in for first 15%, hold, fade out for last 30%.
+    let alpha: number;
+    if (t < 0.15) alpha = t / 0.15;
+    else if (t > 0.7) alpha = (1 - t) / 0.3;
+    else alpha = 1;
+    // Fireflies pulse softly.
+    if (p.hue === 'firefly') {
+      alpha *= 0.55 + 0.45 * Math.sin(age / 220);
+      ctx.fillStyle = `rgba(253, 224, 128, ${alpha * 0.95})`;
+    } else {
+      ctx.fillStyle = `rgba(220, 220, 200, ${alpha * 0.35})`;
+    }
+    ctx.beginPath();
+    ctx.arc(sx, sy, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 };
 
 const drawPlayer = (

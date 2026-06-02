@@ -45,7 +45,7 @@ export const COUNTER_EXTEND_PER_HIT = 200;
 // Two radii: HIT_RADIUS is where enemies actually get pushed; RING_RADIUS
 // is the visual telegraph (wider). Keeping the telegraph wide lets the
 // player read the attack while the actual catch zone stays disciplined.
-export const KNOCKBACK_HIT_RADIUS = 45;
+export const KNOCKBACK_HIT_RADIUS = 55;
 export const KNOCKBACK_RING_RADIUS = 180;
 export const KNOCKBACK_SPEED = 600;
 export const KNOCKBACK_DURATION = 280;

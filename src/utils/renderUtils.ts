@@ -64,6 +64,12 @@ const drawCounterShield = (
   }
 };
 
+// The player sprite is rendered larger than its hitbox so the pixel art reads
+// chunky. The visual centers on the hitbox center, so its bottom (the feet)
+// sits well below the hitbox bottom — anything anchored at the feet (ground
+// shadow, light halo offset, etc.) needs to use this scale.
+const PLAYER_VISUAL_SCALE = 1.7;
+
 interface RenderProps {
   player: Player;
   enemies: Enemy[];
@@ -84,11 +90,15 @@ export const renderGame = (
 
   // Ground shadows for every gameplay entity, drawn before sprites so they
   // ground each character in the scene without obscuring detail.
+  // Player shadow at the visual feet, not the hitbox bottom — the sprite is
+  // drawn at PLAYER_VISUAL_SCALE so its feet hang below the hitbox.
+  const playerFootY =
+    player.y + player.height / 2 + (player.height * PLAYER_VISUAL_SCALE) / 2;
   drawGroundShadow(
     ctx,
     player.x + player.width / 2 - camera.x,
-    player.y + player.height - camera.y - 2,
-    player.width
+    playerFootY - camera.y - 2,
+    player.width * PLAYER_VISUAL_SCALE * 0.55
   );
   for (const enemy of enemies) {
     if (enemy.type === 'ghost') continue; // ghosts hover; no shadow
@@ -604,7 +614,6 @@ const drawPlayer = (
   // collision box stays at player.width/height.
   const flipH = player.direction === 'left'
     || (player.lastDirection && player.lastDirection.x < 0);
-  const PLAYER_VISUAL_SCALE = 1.7;
   const visW = player.width * PLAYER_VISUAL_SCALE;
   const visH = player.height * PLAYER_VISUAL_SCALE;
   const visX = (player.x + player.width / 2) - visW / 2 - camera.x;
@@ -1126,6 +1135,12 @@ const drawPickup = (
   const size = 16;
   const floatOffset = Math.sin(Date.now() / 300 + pickup.x * 0.01) * 2;
   const drawY = cy + floatOffset;
+
+  // Ground shadow under every pickup. Fixed at the base position (not
+  // floating with the item) so the bob animation visibly lifts the sprite
+  // away from its shadow — and so pickups pop against the grass.
+  const shadowAlpha = 0.35 - floatOffset * 0.025; // shrinks slightly as the pickup rises
+  drawGroundShadow(ctx, cx, cy + size / 2, size * 0.85, Math.max(0.22, shadowAlpha));
 
   // Sprite-first. XP gems pick the tier name from the value so the
   // blue/green/red sprites get the right slot. Other pickup types use
